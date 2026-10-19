@@ -8,24 +8,26 @@ A single-project, private NEN integration for **read-only CircleCI diagnostics**
 - **Access self-hosted:** `NEN CircleCI MCP`, Allow policy for `devops@amaraii.com` only.
 - **Access for SaaS OIDC:** `NEN CircleCI MCP OAuth`, same Allow identity; redirect URL `https://nen-circleci-mcp.devops-948.workers.dev/callback`; scopes `openid email profile`.
 - **Bindings:** CircleCI token, Access OAuth client credentials, Access endpoint URLs, cookie key are secret-type bindings; project slug and definition ID are plaintext. **Binding presence is not evidence of a completed OAuth flow.**
-- **This branch:** source-level fail-closed OIDC issuer/signature validation, consent state protection, and read-only project-scoped pipeline, workflow, and job tools. **49 Node tests and 10 sandboxed OAuth-state unit tests passed; 6 targeted browser-cookie checks passed. First native Worker typecheck in CircleCI #33 failed (3 TypeScript errors); fixes pending revalidation. Native full-suite and OAuth integration remain unverified; no deployment.**
+- **This branch:** source-level fail-closed OIDC issuer/signature validation, consent state protection, and read-only project-scoped pipeline, workflow, and job tools. **CircleCI #36 verified locked npm installation and a passing full Worker TypeScript check. The native test suite ran 62 tests: 61 passed, 1 consent-cookie assertion failed. That test inspected a cookie string after removing its attributes; its assertion has been corrected but has not yet passed CircleCI. Wrangler dry-run and OAuth integration remain unverified; no deployment.**
 
-## CircleCI identifiers — verified previously
+## CircleCI identifiers — NEN MCP project
 
-- Project slug: `circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL`
-- Definition: `b5a41026-8298-4976-956b-49fbca6de695` (`build-and-test`)
-- Successful reference pipeline: `85624194-342e-4aea-8aa1-f7cdf5153f51`
-- Workflow: `7451fa90-9a37-4bc2-bfc2-881e58b7cd69`
+- Project slug: `circleci/B65DMdC1ZhAJQM74t7SrZ1/4QT9iy1PpGnXx8VQDfdzLm`
+- Project ID: `1b91a371-7988-4bb9-bc61-4d790c8015be`
+- Definition: `efb046dd-5d13-43b7-a979-a7bf66243da6` (`build-and-test`)
+- Automatic GitHub PR/push trigger: disabled, confirmed by CircleCI screenshot.
+
+The earlier Jayson storefront project/definition IDs are **not** valid for this MCP repository.
 
 IDs are identifiers, **not credentials**. Never commit or print the CircleCI token or OAuth secrets.
 
 ## Remote validation without a Mac or Work
 
-On-demand CircleCI validation is staged in [`.circleci/config.yml`](.circleci/config.yml). It defines two **disabled-by-default** parameter-gated workflows: `bootstrap_lockfile=true` produces a reviewed `package-lock.json` artifact, and `run_validation=true` runs `npm ci`, the full TypeScript check and tests, and a Wrangler **dry run**. See [Remote validation runbook](docs/REMOTE-VALIDATION.md) for the CircleCI GitHub App project connection, disabling default push triggers, and manual trigger parameters. **CircleCI project is connected and its GitHub push trigger disabled. Validation #33 failed TypeScript checks (three errors); targeted source fixes are committed. Lockfile bootstrap #34 succeeded and the refreshed single-SDK npm v3 lockfile has been reviewed and committed. NEXT: manually run full validation; it has not passed yet.**
+On-demand CircleCI validation is staged in [`.circleci/config.yml`](.circleci/config.yml). It defines two **disabled-by-default** parameter-gated workflows: `bootstrap_lockfile=true` produces a reviewed `package-lock.json` artifact, and `run_validation=true` runs `npm ci`, the full TypeScript check and tests, and a Wrangler **dry run**. See [Remote validation runbook](docs/REMOTE-VALIDATION.md) for the CircleCI GitHub App project connection, disabling default push triggers, and manual trigger parameters. **CircleCI project is connected and GitHub push trigger disabled. Bootstrap #34 succeeded; validation #36 passed locked install and full TypeScript check, then stopped at a single test assertion (61/62 passed). The flawed CSRF clear-cookie test assertion has been corrected at commit `c0dd989d`; NEXT: manually rerun validation for all tests and Wrangler dry-run.**
 
 ## Local/isolated security validation before deployment
 
-Requires Node >=22.18 (native TypeScript type stripping). **The refreshed lockfile from CircleCI #34 is committed at `fe9cbb97` (Git blob `483b7c0f8a0f4f14ffc212c3935741210fc83224`) and matches `package.json`. It pins MCP SDK `1.29.0` without nested duplicate SDKs. Next, verify `npm ci`, TypeScript, tests and Wrangler dry-run in a manually triggered CI validation.** 49 tests covering OIDC/JWT, CircleCI project scoping and replay-guard nonce consumption passed in an isolated Node 22.16 runtime using `--experimental-strip-types`; the `oauth-state.test.mjs` suite additionally passed **10/10 in an isolated JavaScript harness** (runtime TypeScript stripping, test-only stubs, exact GitHub source and test blobs). The newer `access-handler.test.mjs` has only passed JavaScript syntax parsing and has **not been executed**. A successful full `npm run check` remains pending in CircleCI; the previous run #33 failed three errors that have been addressed in source but not yet validated end-to-end.
+Requires Node >=22.18 (native TypeScript type stripping). **The refreshed lockfile from CircleCI #34 is committed at `fe9cbb97` (Git blob `483b7c0f8a0f4f14ffc212c3935741210fc83224`) and matches `package.json`. It pins MCP SDK `1.29.0` without nested duplicate SDKs. Next, verify `npm ci`, TypeScript, tests and Wrangler dry-run in a manually triggered CI validation.** 49 tests covering OIDC/JWT, CircleCI project scoping and replay-guard nonce consumption passed in an isolated Node 22.16 runtime using `--experimental-strip-types`; the `oauth-state.test.mjs` suite additionally passed **10/10 in an isolated JavaScript harness** (runtime TypeScript stripping, test-only stubs, exact GitHub source and test blobs). The native `access-handler.test.mjs` ran in CircleCI #36; the consent-cookie assertion failed because its helper discarded Set-Cookie attributes. That test was corrected and awaits a new CircleCI run. **Full Worker `npm run check` passed in CircleCI #36**, but the 62-test suite and Wrangler dry-run have not yet fully passed.
 
 ```sh
 npm install --ignore-scripts
