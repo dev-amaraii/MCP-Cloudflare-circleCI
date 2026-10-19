@@ -5,3 +5,7 @@ workers_dev = true
 
 # All CircleCI credentials and access configuration must be Worker secrets.
 # No CircleCI token or OAuth secret belongs in this file.
+
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "b27a78e5d8a8447ea233f0e7c92459d4"
