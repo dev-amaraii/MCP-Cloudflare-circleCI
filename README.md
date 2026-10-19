@@ -19,6 +19,10 @@ A single-project, private NEN integration for **read-only CircleCI diagnostics**
 
 IDs are identifiers, **not credentials**. Never commit or print the CircleCI token or OAuth secrets.
 
+## Remote validation without a Mac or Work
+
+On-demand CircleCI validation is staged in [`.circleci/config.yml`](.circleci/config.yml). It defines two **disabled-by-default** parameter-gated workflows: `bootstrap_lockfile=true` produces a reviewed `package-lock.json` artifact, and `run_validation=true` runs `npm ci`, the full TypeScript check and tests, and a Wrangler **dry run**. See [Remote validation runbook](docs/REMOTE-VALIDATION.md) for the CircleCI GitHub App project connection, disabling default push triggers, and manual trigger parameters. **Neither job has run; no lockfile exists yet. CircleCI project connection is unverified.**
+
 ## Local/isolated security validation before deployment
 
 Requires Node >=22.18 (native TypeScript type stripping). Dependencies are not lockfile-pinned yet; that is an open release gate. 49 tests covering OIDC/JWT, CircleCI project scoping and replay-guard nonce consumption passed in an isolated Node 22.16 runtime using `--experimental-strip-types`; the `oauth-state.test.mjs` suite additionally passed **10/10 in an isolated JavaScript harness** (runtime TypeScript stripping, test-only stubs, exact GitHub source and test blobs). The newer `access-handler.test.mjs` has only passed JavaScript syntax parsing and has **not been executed**. Full `npm run check` remains pending because dependencies are not available in this execution environment.
