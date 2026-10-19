@@ -14,7 +14,7 @@ change Cloudflare Access settings, or trigger CircleCI automatically.
 - **Lockfile regeneration COMPLETED:** CircleCI bootstrap pipeline **#34** succeeded on `fix/oauth-claims-hardening`, checking the aligned SDK version and uploading an artifact. The user supplied this lockfile, which passed manifest, single-SDK and registry/integrity metadata checks; the new `package-lock.json` was committed at `fe9cbb97ade30c42025b57b26999dbf3a7d1dfeb` (blob `483b7c0f8a0f4f14ffc212c3935741210fc83224`). Next run is manual full validation, **not** another bootstrap.
 - Config YAML was parsed locally and manual-guard defaults were inspected.
   This is **not** a CircleCI config compile, pipeline execution or full test pass.
-- CircleCI **validation #33** failed at `npm run check` (missing Node typings, WebCrypto `BufferSource` mismatch and duplicate MCP SDK). Source fixes were committed, and subsequent CircleCI **bootstrap #34 passed** and produced the corrected single-SDK lockfile. Full TypeScript checks, tests and Wrangler dry-run **have not yet passed** for the corrected branch.
+- CircleCI **validation #33/#35** failed TypeScript checks, but **validation #36** passed `npm ci` and the full Worker TypeScript check. Of 62 native tests, 61 passed; one consent-cookie assertion failed because its helper dropped Set-Cookie attributes. The test was corrected on the draft branch at `c0dd989d` and awaits a new manual CircleCI validation run. Wrangler dry-run has not run yet.
 
 ## 1. One-time CircleCI project setup (requires CircleCI web UI)
 
@@ -60,7 +60,7 @@ as a CircleCI artifact. No dependency scripts and no deploy are run.
 
 **Refresh completed:** The artifact produced by CircleCI pipeline #34 was reviewed and committed. The new npm lockfile v3 contains 290 package records, a single root MCP SDK `1.29.0`, and 289 resolved registry packages with SHA-512 integrity metadata. GitHub readback confirms blob SHA `483b7c0f8a0f4f14ffc212c3935741210fc83224`. Do not rerun bootstrap unless dependencies change.
 
-## 3. Run full validation — NEXT: after successful bootstrap #34
+## 3. Re-run full validation — NEXT: after correcting the #36 test assertion
 
 Again, **requires a separately approved CircleCI execution**.
 Trigger Pipeline with the same two branches and:
