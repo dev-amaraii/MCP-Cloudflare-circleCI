@@ -137,7 +137,7 @@ export async function handleAccessRequest(
 		}
 
 		// Exchange the code for an access token, including the PKCE verifier
-		const [accessToken, idToken, errResponse] = await fetchUpstreamAuthToken({
+		const [_accessToken, idToken, errResponse] = await fetchUpstreamAuthToken({
 			client_id: env.ACCESS_CLIENT_ID,
 			client_secret: env.ACCESS_CLIENT_SECRET,
 			code: searchParams.get("code") ?? undefined,
@@ -156,9 +156,9 @@ export async function handleAccessRequest(
 			return new Response("Forbidden", { status: 403 });
 		}
 		const user = {
-			email: idTokenClaims.email,
-			name: idTokenClaims.name,
-			sub: idTokenClaims.sub,
+			email: idTokenClaims.email as string,
+			name: typeof idTokenClaims.name === "string" ? idTokenClaims.name : (idTokenClaims.email as string),
+			sub: idTokenClaims.sub as string,
 		};
 
 		// Return back to the MCP client a new token
@@ -168,7 +168,6 @@ export async function handleAccessRequest(
 			},
 			// This will be available on this.props inside MyMCP
 			props: {
-				accessToken,
 				email: user.email,
 				login: user.sub,
 				name: user.name,
