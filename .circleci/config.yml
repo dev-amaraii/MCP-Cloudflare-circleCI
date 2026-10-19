@@ -1,0 +1,86 @@
+version: 2.1
+
+# Manual/API only. Do not attach GitHub push or pull-request triggers to this
+# CircleCI pipeline. These parameters also default to false as defense in depth.
+parameters:
+  bootstrap_lockfile:
+    type: boolean
+    default: false
+  run_validation:
+    type: boolean
+    default: false
+
+jobs:
+  export_lockfile:
+    docker:
+      - image: cimg/node:24.13
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Verify this is the reviewed security branch
+          command: |
+            test "$CIRCLE_BRANCH" = "fix/oauth-claims-hardening" || {
+              echo 'Lockfile regeneration is permitted only for the reviewed security branch.' >&2
+              exit 1
+            }
+      - run:
+          name: Re-resolve a clean lockfile for the aligned SDK version without running scripts
+          command: |
+            # Do not retain an obsolete nested SDK from the prior 1.32.1 lock.
+            # This removes the lock ONLY inside this ephemeral, manual CI job.
+            rm -f package-lock.json
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - run:
+          name: Verify npm created a valid lockfile
+          command: |
+            node -e 'const f=require("./package-lock.json"),p=require("./package.json"),r=f.packages[""]; if(f.lockfileVersion !== 3 || f.name !== p.name || !r || JSON.stringify(r.dependencies) !== JSON.stringify(p.dependencies) || JSON.stringify(r.devDependencies) !== JSON.stringify(p.devDependencies) || JSON.stringify(r.engines) !== JSON.stringify(p.engines)) process.exit(1); const sdk=f.packages["node_modules/@modelcontextprotocol/sdk"]; if(sdk?.version !== "1.29.0" || Object.keys(f.packages).some(k => k.includes("/node_modules/@modelcontextprotocol/sdk"))) { console.error("MCP SDK must be installed only once at 1.29.0"); process.exit(1); } console.log("Lockfile matches manifest and single MCP SDK; version",f.lockfileVersion)'
+      - store_artifacts:
+          path: package-lock.json
+          destination: package-lock.json
+
+  validate:
+    docker:
+      - image: cimg/node:24.13
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Verify reviewed dependency lockfile exists
+          command: |
+            test -f package-lock.json || {
+              echo 'Missing package-lock.json. Run bootstrap_lockfile first, review artifact and commit it.' >&2
+              exit 1
+            }
+      - run:
+          name: Install exactly locked dependencies
+          command: npm ci --no-audit --no-fund
+      - run:
+          name: Typecheck the complete Worker
+          command: npm run check
+      - run:
+          name: Run all committed test suites
+          command: npm test
+      - run:
+          name: Bundle the Worker without publishing or changing Cloudflare
+          command: npx --no-install wrangler deploy --dry-run
+
+workflows:
+  manually-requested-lockfile:
+    when: << pipeline.parameters.bootstrap_lockfile >>
+    jobs:
+      - export_lockfile:
+          filters:
+            branches:
+              only:
+                - fix/oauth-claims-hardening
+
+  manually-requested-validation:
+    when: << pipeline.parameters.run_validation >>
+    jobs:
+      - validate:
+          filters:
+            branches:
+              only:
+                - fix/oauth-claims-hardening
+                - main

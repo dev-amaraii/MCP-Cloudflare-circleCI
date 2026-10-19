@@ -4,3 +4,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# Private, resource-bound staging overrides; never commit staging IDs or secrets.
+wrangler.staging.toml
+.dev.vars.*

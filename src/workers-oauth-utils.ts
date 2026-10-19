@@ -2,6 +2,7 @@
 // OAuth utility functions with CSRF and state validation security fixes
 
 import type { AuthRequest, ClientInfo } from "@cloudflare/workers-oauth-provider";
+import { claimStateOnce } from "./oauth-replay-guard.ts";
 
 /**
  * OAuth 2.1 compliant error class.
@@ -14,12 +15,14 @@ export class OAuthError extends Error {
 	 * @param description - Human-readable error description
 	 * @param statusCode - HTTP status code to return (defaults to 400)
 	 */
-	constructor(
-		public code: string,
-		public description: string,
-		public statusCode = 400,
-	) {
+	code: string;
+	description: string;
+	statusCode: number;
+	constructor(code: string, description: string, statusCode = 400) {
 		super(description);
+		this.code = code;
+		this.description = description;
+		this.statusCode = statusCode;
 		this.name = "OAuthError";
 	}
 
@@ -187,6 +190,43 @@ export function sanitizeUrl(url: string): string {
 	return normalized;
 }
 
+const STATE_COOKIE_NAME = "__Host-OAUTH_STATE";
+
+/** A browser-session-only fingerprint, never the state token itself. */
+async function hashOAuthState(stateToken: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stateToken));
+  const bytes = new Uint8Array(digest);
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+/** Called on every redirect to Access (including previously approved MCP clients). */
+export async function bindOAuthStateCookie(stateToken: string): Promise<string> {
+  const fingerprint = await hashOAuthState(stateToken);
+  return `${STATE_COOKIE_NAME}=${fingerprint}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=600`;
+}
+
+export function clearOAuthStateCookie(): string {
+  return `${STATE_COOKIE_NAME}=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0`;
+}
+
+/** Prevent login CSRF by checking browser continuity before consuming one-time state. */
+export async function validateOAuthStateCookie(request: Request, stateToken: string): Promise<void> {
+  const cookie = request.headers.get("Cookie")?.split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith(`${STATE_COOKIE_NAME}=`));
+  const received = cookie?.slice(STATE_COOKIE_NAME.length + 1);
+  if (!received || !/^[A-Za-z0-9_-]{43}$/.test(received)) {
+    throw new OAuthError("invalid_request", "Missing OAuth session cookie", 400);
+  }
+  const expected = await hashOAuthState(stateToken);
+  if (received !== expected) {
+    throw new OAuthError("invalid_request", "OAuth session cookie mismatch", 400);
+  }
+}
+
 /**
  * Generates a new CSRF token and corresponding cookie for form protection
  * @returns Object containing the token and Set-Cookie header value
@@ -281,6 +321,8 @@ export async function validateOAuthState(
 	request: Request,
 	kv: KVNamespace,
 	secret: string,
+	replayGuard: DurableObjectNamespace,
+	requireSessionCookie = false,
 ): Promise<ValidateStateResult> {
 	const url = new URL(request.url);
 	const stateFromQuery = url.searchParams.get("state");
@@ -302,6 +344,10 @@ export async function validateOAuthState(
 		throw new OAuthError("invalid_request", "Invalid state signature", 400);
 	}
 
+	// The upstream callback must originate from the browser that started login.
+	// Consent POST already has a separate double-submit CSRF cookie and signed state.
+	if (requireSessionCookie) await validateOAuthStateCookie(request, stateFromQuery);
+
 	// Look up by UUID only after signature is verified
 	const storedDataJson = await kv.get(`oauth:state:${uuid}`);
 	if (!storedDataJson) {
@@ -315,7 +361,21 @@ export async function validateOAuthState(
 		throw new OAuthError("server_error", "Invalid state data", 500);
 	}
 
-	// Delete state from KV (one-time use)
+	if (!stored?.oauthReqInfo?.clientId || typeof stored.codeVerifier !== "string" || !stored.codeVerifier) {
+		throw new OAuthError("server_error", "Invalid stored state", 500);
+	}
+
+	// Cloudflare KV reads/deletes are not atomic: a Durable Object SQL primary key
+	// ensures only one concurrent callback can claim this nonce.
+	let claimed: boolean;
+	try {
+		claimed = await claimStateOnce(replayGuard, uuid);
+	} catch {
+		throw new OAuthError("server_error", "OAuth state validation unavailable", 503);
+	}
+	if (!claimed) {
+		throw new OAuthError("invalid_request", "State already used", 400);
+	}
 	await kv.delete(`oauth:state:${uuid}`);
 
 	return { oauthReqInfo: stored.oauthReqInfo, codeVerifier: stored.codeVerifier };
@@ -884,6 +944,7 @@ export async function fetchUpstreamAuthToken(params: {
 
 	const response = await fetch(params.upstream_url, {
 		method: "POST",
+		redirect: "error", // never forward client credentials across upstream redirects
 		headers: {
 			"Content-Type": "application/x-www-form-urlencoded",
 			Accept: "application/json",
@@ -892,25 +953,19 @@ export async function fetchUpstreamAuthToken(params: {
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
-		return [
-			null,
-			null,
-			new Response(`Failed to exchange code for token: ${errorText}`, {
-				status: response.status,
-			}),
-		];
+		// Never relay an upstream body (which can contain sensitive diagnostics).
+		return [null, null, new Response("Upstream authentication failed", { status: 502 })];
 	}
 
 	const body = (await response.json()) as any;
 
-	const accessToken = body.access_token as string;
-	if (!accessToken) {
+	const accessToken = body?.access_token;
+	if (typeof accessToken !== "string" || !accessToken) {
 		return [null, null, new Response("Missing access token", { status: 400 })];
 	}
 
-	const idToken = body.id_token as string;
-	if (!idToken) {
+	const idToken = body?.id_token;
+	if (typeof idToken !== "string" || !idToken) {
 		return [null, null, new Response("Missing id token", { status: 400 })];
 	}
 	return [accessToken, idToken, null];
@@ -920,7 +975,6 @@ export async function fetchUpstreamAuthToken(params: {
  * Props interface for upstream provider user data
  */
 export interface Props {
-	accessToken: string;
 	email: string;
 	login: string;
 	name: string;

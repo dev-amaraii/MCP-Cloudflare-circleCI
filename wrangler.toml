@@ -15,3 +15,11 @@ class_name = "CircleMCP"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["CircleMCP"]
+
+[[durable_objects.bindings]]
+name = "OAUTH_REPLAY_GUARD"
+class_name = "OAuthReplayGuard"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["OAuthReplayGuard"]

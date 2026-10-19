@@ -1,7 +1,9 @@
-import { Buffer } from "node:buffer";
+import { verifyAccessIdToken } from "./access-jwt.ts";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import {
 	addApprovedClient,
+	bindOAuthStateCookie,
+	clearOAuthStateCookie,
 	createOAuthState,
 	fetchUpstreamAuthToken,
 	generateCSRFProtection,
@@ -12,7 +14,7 @@ import {
 	renderApprovalDialog,
 	validateCSRFToken,
 	validateOAuthState,
-} from "./workers-oauth-utils";
+} from "./workers-oauth-utils.ts";
 
 type EnvWithOauth = Env & { OAUTH_PROVIDER: OAuthHelpers };
 
@@ -42,17 +44,20 @@ export async function handleAccessRequest(
 
 		// Generate CSRF protection for the approval form
 		const { token: csrfToken, setCookie } = generateCSRFProtection();
+		// Bind the consent form to the parsed request using an opaque, HMAC-signed KV state.
+		const { stateToken: approvalStateToken } = await createOAuthState(
+			oauthReqInfo, env.OAUTH_KV, env.COOKIE_ENCRYPTION_KEY,
+		);
 
 		return renderApprovalDialog(request, {
 			client: await env.OAUTH_PROVIDER.lookupClient(clientId),
 			csrfToken,
 			server: {
-				description: "This is a demo MCP Remote Server using Access for authentication.",
-				logo: "https://avatars.githubusercontent.com/u/314135?s=200&v=4",
-				name: "Cloudflare Access MCP Server",
+				description: "NEN CircleCI MCP — read-only CI diagnostics. No pipelines may be triggered.",
+				name: "NEN CircleCI MCP",
 			},
 			setCookie,
-			state: { oauthReqInfo },
+			state: { approvalStateToken },
 		});
 	}
 
@@ -70,27 +75,35 @@ export async function handleAccessRequest(
 				return new Response("Missing state in form data", { status: 400 });
 			}
 
-			let state: { oauthReqInfo?: AuthRequest };
+			let state: { approvalStateToken?: unknown };
 			try {
 				state = JSON.parse(atob(encodedState));
-			} catch (_e) {
+			} catch {
 				return new Response("Invalid state data", { status: 400 });
 			}
-
-			if (!state.oauthReqInfo || !state.oauthReqInfo.clientId) {
+			if (typeof state?.approvalStateToken !== "string") {
+				return new Response("Invalid request", { status: 400 });
+			}
+			// Consume the original signed state exactly once; never trust client-supplied AuthRequest.
+			const stateUrl = new URL("/callback", request.url);
+			stateUrl.searchParams.set("state", state.approvalStateToken);
+			const { oauthReqInfo } = await validateOAuthState(
+				new Request(stateUrl), env.OAUTH_KV, env.COOKIE_ENCRYPTION_KEY, env.OAUTH_REPLAY_GUARD,
+			);
+			if (!oauthReqInfo.clientId) {
 				return new Response("Invalid request", { status: 400 });
 			}
 
 			// Add client to approved list
 			const approvedClientCookie = await addApprovedClient(
 				request,
-				state.oauthReqInfo.clientId,
+				oauthReqInfo.clientId,
 				env.COOKIE_ENCRYPTION_KEY,
 			);
 
 			// Create OAuth state
 			const { stateToken, codeChallenge } = await createOAuthState(
-				state.oauthReqInfo,
+				oauthReqInfo,
 				env.OAUTH_KV,
 				env.COOKIE_ENCRYPTION_KEY,
 			);
@@ -102,7 +115,7 @@ export async function handleAccessRequest(
 
 			return redirectToAccess(request, env, stateToken, codeChallenge, redirectHeaders);
 		} catch (error: any) {
-			console.error("POST /authorize error:", error);
+			// Do not log request state, cookies, or OAuth error contents.
 			if (error instanceof OAuthError) {
 				return error.toResponse();
 			}
@@ -121,6 +134,8 @@ export async function handleAccessRequest(
 				request,
 				env.OAUTH_KV,
 				env.COOKIE_ENCRYPTION_KEY,
+				env.OAUTH_REPLAY_GUARD,
+				true,
 			);
 			oauthReqInfo = result.oauthReqInfo;
 			codeVerifier = result.codeVerifier;
@@ -137,24 +152,37 @@ export async function handleAccessRequest(
 		}
 
 		// Exchange the code for an access token, including the PKCE verifier
-		const [accessToken, idToken, errResponse] = await fetchUpstreamAuthToken({
+		let tokenExchange: Awaited<ReturnType<typeof fetchUpstreamAuthToken>>;
+		try {
+			tokenExchange = await fetchUpstreamAuthToken({
 			client_id: env.ACCESS_CLIENT_ID,
 			client_secret: env.ACCESS_CLIENT_SECRET,
 			code: searchParams.get("code") ?? undefined,
 			redirect_uri: new URL("/callback", request.url).href,
 			upstream_url: env.ACCESS_TOKEN_URL,
 			code_verifier: codeVerifier,
-		});
+			});
+		} catch {
+			return new Response("Upstream authentication unavailable", { status: 502 });
+		}
+		const [_accessToken, idToken, errResponse] = tokenExchange;
 		if (errResponse) {
 			return errResponse;
 		}
+		if (typeof idToken !== "string" || !idToken) {
+			return new Response("Missing ID token", { status: 502 });
+		}
 
-		const idTokenClaims = await verifyToken(env, idToken);
-		if (typeof idTokenClaims.email !== "string" || idTokenClaims.email.toLowerCase() !== "devops@amaraii.com") return new Response("Forbidden", {status:403});
+		let idTokenClaims: Awaited<ReturnType<typeof verifyAccessIdToken>>;
+		try {
+			idTokenClaims = await verifyAccessIdToken(env, idToken);
+		} catch {
+			return new Response("Forbidden", { status: 403 });
+		}
 		const user = {
-			email: idTokenClaims.email,
-			name: idTokenClaims.name,
-			sub: idTokenClaims.sub,
+			email: idTokenClaims.email as string,
+			name: typeof idTokenClaims.name === "string" ? idTokenClaims.name : (idTokenClaims.email as string),
+			sub: idTokenClaims.sub as string,
 		};
 
 		// Return back to the MCP client a new token
@@ -164,7 +192,6 @@ export async function handleAccessRequest(
 			},
 			// This will be available on this.props inside MyMCP
 			props: {
-				accessToken,
 				email: user.email,
 				login: user.sub,
 				name: user.name,
@@ -174,7 +201,9 @@ export async function handleAccessRequest(
 			userId: user.sub,
 		});
 
-		return Response.redirect(redirectTo, 302);
+		const headers = new Headers({ Location: redirectTo });
+		headers.append("Set-Cookie", clearOAuthStateCookie());
+		return new Response(null, { status: 302, headers });
 	}
 
 	return new Response("Not Found", { status: 404 });
@@ -188,6 +217,7 @@ async function redirectToAccess(
 	extraHeaders: Headers = new Headers(),
 ) {
 	const headers = new Headers(extraHeaders);
+	headers.append("Set-Cookie", await bindOAuthStateCookie(stateToken));
 	headers.set(
 		"location",
 		getUpstreamAuthorizeUrl({
@@ -200,76 +230,4 @@ async function redirectToAccess(
 		}),
 	);
 	return new Response(null, { headers, status: 302 });
-}
-
-/**
- * Helper to get the Access public keys from the certs endpoint
- */
-async function fetchAccessPublicKey(env: Env, kid: string) {
-	if (!env.ACCESS_JWKS_URL) {
-		throw new Error("access jwks url not provided");
-	}
-	// TODO: cache this
-	const resp = await fetch(env.ACCESS_JWKS_URL);
-	const keys = (await resp.json()) as {
-		keys: (JsonWebKey & { kid: string })[];
-	};
-	const jwk = keys.keys.filter((key) => key.kid === kid)[0];
-	const key = await crypto.subtle.importKey(
-		"jwk",
-		jwk,
-		{
-			hash: "SHA-256",
-			name: "RSASSA-PKCS1-v1_5",
-		},
-		false,
-		["verify"],
-	);
-	return key;
-}
-
-/**
- * Parse a JWT into its respective pieces. Does not do any validation other than form checking.
- */
-function parseJWT(token: string) {
-	const tokenParts = token.split(".");
-
-	if (tokenParts.length !== 3) {
-		throw new Error("token must have 3 parts");
-	}
-
-	return {
-		data: `${tokenParts[0]}.${tokenParts[1]}`,
-		header: JSON.parse(Buffer.from(tokenParts[0], "base64url").toString()),
-		payload: JSON.parse(Buffer.from(tokenParts[1], "base64url").toString()),
-		signature: tokenParts[2],
-	};
-}
-
-/**
- * Validates the provided token using the Access public key set
- */
-async function verifyToken(env: Env, token: string) {
-	const jwt = parseJWT(token);
-	const key = await fetchAccessPublicKey(env, jwt.header.kid);
-
-	const verified = await crypto.subtle.verify(
-		"RSASSA-PKCS1-v1_5",
-		key,
-		Buffer.from(jwt.signature, "base64url"),
-		Buffer.from(jwt.data),
-	);
-
-	if (!verified) {
-		throw new Error("failed to verify token");
-	}
-
-	const claims = jwt.payload;
-	const now = Math.floor(Date.now() / 1000);
-	// Validate expiration
-	if (claims.exp < now) {
-		throw new Error("expired token");
-	}
-
-	return claims;
 }
