@@ -6,6 +6,9 @@ import {
   generateCSRFProtection,
   validateCSRFToken,
   fetchUpstreamAuthToken,
+  bindOAuthStateCookie,
+  validateOAuthStateCookie,
+  clearOAuthStateCookie,
 } from "../src/workers-oauth-utils.ts";
 
 const SECRET = "test-ONLY-32-byte-cryptographic-secret";
@@ -82,6 +85,50 @@ test("authorization consent form requires matching double-submit CSRF", () => {
   assert.throws(() => validateCSRFToken(form, request), /CSRF/);
   assert.throws(() => validateCSRFToken(new FormData(), request), /CSRF/);
 });
+test("OAuth callback cookie is scoped, HttpOnly and tied to a signed state", async () => {
+  const kv = fakeKV();
+  const guard = fakeGuard();
+  const { stateToken } = await createOAuthState({ clientId: "good" }, kv, SECRET);
+  const cookieHeader = await bindOAuthStateCookie(stateToken);
+  assert.match(cookieHeader, /^__Host-OAUTH_STATE=[A-Za-z0-9_-]+;/);
+  assert.match(cookieHeader, /HttpOnly; Secure; Path=\/; SameSite=Lax; Max-Age=600/);
+  const request = new Request(requestFor(stateToken), {
+    headers: { Cookie: cookieHeader.split(";")[0] },
+  });
+  await validateOAuthStateCookie(request, stateToken);
+  assert.equal((await validateOAuthState(request, kv, SECRET, guard, true)).oauthReqInfo.clientId, "good");
+  assert.match(clearOAuthStateCookie(), /Max-Age=0/);
+});
+test("missing callback session cookie rejects before consuming signed state", async () => {
+  const kv = fakeKV();
+  const guard = fakeGuard();
+  const { stateToken } = await createOAuthState({ clientId: "good" }, kv, SECRET);
+  await assert.rejects(validateOAuthState(requestFor(stateToken), kv, SECRET, guard, true), /session cookie/i);
+  assert.equal(kv.data.size, 1);
+  const cookie = (await bindOAuthStateCookie(stateToken)).split(";")[0];
+  const req = new Request(requestFor(stateToken), { headers: { Cookie: cookie } });
+  assert.equal((await validateOAuthState(req, kv, SECRET, guard, true)).oauthReqInfo.clientId, "good");
+});
+test("callback state from another browser session is rejected", async () => {
+  const kv = fakeKV();
+  const guard = fakeGuard();
+  const { stateToken } = await createOAuthState({ clientId: "good" }, kv, SECRET);
+  const { stateToken: otherState } = await createOAuthState({ clientId: "other" }, kv, SECRET);
+  const wrongCookie = (await bindOAuthStateCookie(otherState)).split(";")[0];
+  const req = new Request(requestFor(stateToken), { headers: { Cookie: wrongCookie } });
+  await assert.rejects(validateOAuthState(req, kv, SECRET, guard, true), /session cookie/i);
+  assert.equal(kv.data.size, 2);
+});
+test("tampered callback cookie is rejected", async () => {
+  const kv = fakeKV();
+  const guard = fakeGuard();
+  const { stateToken } = await createOAuthState({ clientId: "good" }, kv, SECRET);
+  const cookie = (await bindOAuthStateCookie(stateToken)).split(";")[0];
+  const req = new Request(requestFor(stateToken), { headers: { Cookie: cookie.slice(0,-1)+"x" } });
+  await assert.rejects(validateOAuthState(req, kv, SECRET, guard, true), /session cookie/i);
+  assert.equal(kv.data.size, 1);
+});
+
 test("upstream OAuth errors do not expose upstream response bodies", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("private-token-leak-marker", { status: 401 });
