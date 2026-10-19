@@ -2,6 +2,8 @@ import { verifyAccessIdToken } from "./access-jwt";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import {
 	addApprovedClient,
+	bindOAuthStateCookie,
+	clearOAuthStateCookie,
 	createOAuthState,
 	fetchUpstreamAuthToken,
 	generateCSRFProtection,
@@ -133,6 +135,7 @@ export async function handleAccessRequest(
 				env.OAUTH_KV,
 				env.COOKIE_ENCRYPTION_KEY,
 				env.OAUTH_REPLAY_GUARD,
+				true,
 			);
 			oauthReqInfo = result.oauthReqInfo;
 			codeVerifier = result.codeVerifier;
@@ -198,7 +201,9 @@ export async function handleAccessRequest(
 			userId: user.sub,
 		});
 
-		return Response.redirect(redirectTo, 302);
+		const headers = new Headers({ Location: redirectTo });
+		headers.append("Set-Cookie", clearOAuthStateCookie());
+		return new Response(null, { status: 302, headers });
 	}
 
 	return new Response("Not Found", { status: 404 });
@@ -212,6 +217,7 @@ async function redirectToAccess(
 	extraHeaders: Headers = new Headers(),
 ) {
 	const headers = new Headers(extraHeaders);
+	headers.append("Set-Cookie", await bindOAuthStateCookie(stateToken));
 	headers.set(
 		"location",
 		getUpstreamAuthorizeUrl({
