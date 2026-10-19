@@ -9,7 +9,7 @@ const pipeline = "11111111-1111-4111-8111-111111111111";
 const workflow = "22222222-2222-4222-8222-222222222222";
 const job = "33333333-3333-4333-8333-333333333333";
 const project = "gh/nen/example";
-const tools = ["circleci_pipeline_status", "circleci_pipeline_workflows", "circleci_workflow_status", "circleci_workflow_jobs", "circleci_job_details", "circleci_job_logs"];
+const tools = ["circleci_project_status", "circleci_pipeline_status", "circleci_pipeline_workflows", "circleci_workflow_status", "circleci_workflow_jobs", "circleci_job_details", "circleci_job_logs"];
 
 async function connect(email?: string) {
 	const requests: string[] = [];
@@ -23,6 +23,8 @@ async function connect(email?: string) {
 		}
 		assert.equal(url.origin, "https://circleci.com");
 		const responses: Record<string, unknown> = {
+			[`/api/v2/project/${project}`]: { slug: project, name: "example", vcs_info: { vcs_url: "https://github.com/nen/example" } },
+			[`/api/v2/project/${project}/pipeline`]: { items: [{ id: pipeline, project_slug: project }], next_page_token: null },
 			[`/api/v2/pipeline/${pipeline}`]: { id: pipeline, project_slug: project },
 			[`/api/v2/pipeline/${pipeline}/workflow`]: { items: [{ id: workflow }], next_page_token: null },
 			[`/api/v2/workflow/${workflow}`]: { id: workflow, pipeline_id: pipeline },
@@ -42,13 +44,13 @@ async function connect(email?: string) {
 	return { client, server, requests, close: async () => { await client.close(); await server.close(); } };
 }
 
-test("MCP initializes, lists exactly six tools, and executes only read-only requests", async () => {
+test("MCP initializes, lists exactly seven tools, and executes only read-only requests", async () => {
 	const session = await connect("devops@amaraii.com");
 	try {
 		assert.equal(session.client.getServerVersion()?.name, "test-circleci");
 		assert.deepEqual((await session.client.listTools()).tools.map(t => t.name).sort(), [...tools].sort());
 		for (const name of tools) {
-			const args = name.startsWith("circleci_pipeline") ? { pipeline_id: pipeline } : name.startsWith("circleci_workflow") ? { workflow_id: workflow } : { workflow_id: workflow, job_id: job };
+			const args = name === "circleci_project_status" ? {} : name.startsWith("circleci_pipeline") ? { pipeline_id: pipeline } : name.startsWith("circleci_workflow") ? { workflow_id: workflow } : { workflow_id: workflow, job_id: job };
 			const result = await session.client.callTool({ name, arguments: args });
 			assert.equal(result.isError, false, name);
 			assert.ok(Array.isArray(result.content) && result.content.length > 0);

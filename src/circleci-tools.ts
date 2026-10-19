@@ -13,6 +13,12 @@ export function registerCircleCITools(server: McpServer, env: CircleCIEnv, props
 	const client = new CircleCIClient(env, fetcher);
 
 	server.tool(
+		"circleci_project_status",
+		"Get the configured CircleCI project and one page of its pipelines, including IDs needed by the other read-only tools.",
+		{ page_token: z.string().max(1024).optional() },
+		async ({ page_token }) => invoke(() => client.getProjectStatus(page_token)),
+	);
+	server.tool(
 		"circleci_pipeline_status",
 		"Get the status and summary of a pipeline in the configured CircleCI project.",
 		{ pipeline_id: z.string().uuid() },

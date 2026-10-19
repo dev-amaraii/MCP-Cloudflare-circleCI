@@ -4,6 +4,7 @@ A read-only CircleCI MCP server on Cloudflare Workers, protected by Cloudflare A
 
 ## Tools
 
+- `circleci_project_status` — discover the configured project and pipeline IDs
 - `circleci_pipeline_status`
 - `circleci_pipeline_workflows`
 - `circleci_workflow_status`

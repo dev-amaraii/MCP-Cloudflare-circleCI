@@ -137,6 +137,12 @@ export class CircleCIClient {
 		return workflow;
 	}
 
+	async getProjectStatus(pageToken?: string): Promise<Record<string, unknown>> {
+		const project = asRecord(await this.getV2(`/project/${this.projectPath}`));
+		const pipelines = await this.getPage(`/project/${this.projectPath}/pipeline`, pageToken);
+		return { project, pipelines };
+	}
+
 	async getPipeline(pipelineId: string): Promise<Record<string, unknown>> {
 		return this.assertProjectPipeline(pipelineId);
 	}

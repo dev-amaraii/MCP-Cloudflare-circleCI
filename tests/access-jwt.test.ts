@@ -41,7 +41,7 @@ test("real Streamable HTTP client initializes and lists/calls tools through sign
 	try {
 		await client.connect(transport);
 		assert.equal(client.getServerVersion()?.name,"nen-circleci-mcp");
-		assert.equal((await client.listTools()).tools.length,6);
+		assert.equal((await client.listTools()).tools.length,7);
 		assert.equal((await client.callTool({name:"circleci_pipeline_status",arguments:{pipeline_id:pipeline}})).isError,false);
 	} finally {await client.close();}
 });

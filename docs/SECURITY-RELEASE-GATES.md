@@ -9,7 +9,7 @@ Current architecture: Access Managed OAuth with a signed-assertion, stateless St
 - [x] 35 tests pass, including real HTTP MCP initialization/list/call through signed assertion verification.
 - [x] Missing/forged/expired/wrong-issuer/wrong-audience/wrong-email assertions fail before CircleCI access.
 - [x] Pipeline → workflow → job ownership checks and bounded log fetches remain in place.
-- [x] Only six read-only tools are registered. Unknown mutation names make no API calls.
+- [x] Only seven read-only tools are registered. Unknown mutation names make no API calls.
 - [x] Worker dry run passes; the active entry point requires no KV/DO provisioning or migration.
 - [x] Cloudflare account, team issuer, audience and public URL are explicit in configuration.
 - [x] Production encrypted credentials remain in Cloudflare; no tokens or owner verification codes enter handoff notes.
@@ -30,10 +30,11 @@ Current architecture: Access Managed OAuth with a signed-assertion, stateless St
 
 A protected manual deployment is authorized to complete live verification; it is not an assertion that client acceptance has passed. Preserve Access policy enforcement, encrypted CircleCI credentials and dashboard project variables. The old Worker bootstrap has no usable MCP implementation, so signed-in origin tests require deploying the tested origin. Keep the PR draft until those tests pass.
 
-- [ ] Refresh expired local Cloudflare CLI login and verify the intended account.
-- [ ] Deploy the tested commit manually with `npm run deploy` and record the version.
-- [ ] Verify anonymous/invalid bearer denial on the deployed endpoint.
-- [ ] Complete Codex OAuth, initialize the deployed MCP and list/call tools.
+- [x] Refresh Cloudflare CLI login and verify the intended account.
+- [x] Deploy tested commit `031070d` manually: version `3cdaf83a-cdd0-46ed-ba27-f3a562c7497c`. A read-only discovery tool follow-up is being validated.
+- [x] Verify anonymous/invalid bearer/forged assertion denial on the deployed endpoint.
+- [x] Complete Codex OAuth, initialize the deployed MCP and list its original six tools.
+- [ ] Call the live CircleCI tools through the deployed MCP.
 - [ ] Complete a real private ChatGPT MCP connection; initialization/tool listing must be observed.
 - [ ] Confirm the configured CircleCI project maps to `dev-amaraii/MCP-Cloudflare-circleCI` and the existing token can read it.
 - [ ] Observe a successful hosted CircleCI verification run for the deployed PR commit.
