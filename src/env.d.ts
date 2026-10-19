@@ -1,4 +1,5 @@
 interface Env {
+	MCP_PUBLIC_URL: string;
   OAUTH_KV: KVNamespace;
   MCP_OBJECT: DurableObjectNamespace;
   CIRCLE_TOKEN: string;

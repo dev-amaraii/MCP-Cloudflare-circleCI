@@ -1,26 +1,45 @@
-# Deployment security gate — 2026-10-19
+# Security release gates
 
-## Verified via Cloudflare API
-- Worker `nen-circleci-mcp` exists and currently runs **bootstrap-only** code; `/mcp` is not implemented in the deployed script.
-- Access application `NEN CircleCI MCP` exists; its single associated allow policy includes **only** `devops@amaraii.com`. No Everyone or Bypass policy was returned.
-- Worker bindings `ACCESS_AUD`, `ACCESS_TEAM_DOMAIN`, `CIRCLE_PROJECT_SLUG`, `CIRCLE_DEFINITION_ID` exist as plain text; `CIRCLE_TOKEN` exists as **secret_text**.
-- Do not copy secret values to this repository, issues, logs or chat.
+This file separates local implementation and test evidence from live service verification. The production Worker remains unchanged.
 
-## Do not confuse authentication layers
-1. Cloudflare Access self-hosted Worker protection (verified policy).
-2. MCP OAuth 2.1 discovery, dynamic client registration, authorization code + PKCE, token issuance, consent and token verification (**NOT implemented**).
-3. CircleCI API credential (secret binding; **NOT yet exercised**).
+## Previously observed Cloudflare state
 
-## Release gates
-- [x] Access policy restricted to the NEN identity.
-- [x] CircleCI token binding encrypted.
-- [ ] Review official Cloudflare Workers OAuth Provider / Access for SaaS example and implement complete remote MCP OAuth.
-- [ ] Build, typecheck and test with locked dependencies.
-- [ ] Confirm Worker Access interception and unauthenticated `POST /mcp` rejection externally.
-- [ ] Deploy authenticated MCP; test initialize, tools/list and read-only tools.
-- [ ] Enable trigger only after read-only validation and explicit human approval.
-- [ ] Connect ChatGPT and validate an end-to-end trigger.
+The Cloudflare inspection recorded on 2026-10-19 found the `nen-circleci-mcp` Worker running bootstrap-only code, a self-hosted Access application with an allow policy limited to `devops@amaraii.com`, the OAuth SaaS application with the same intended email restriction, and the existing encrypted `CIRCLE_TOKEN` binding. This turn did not make or verify new Cloudflare changes.
 
-**Caution:** `src/index.ts` is an unverified prototype and must not be deployed as production MCP. In particular, direct `Cf-Access-Jwt-Assertion` validation alone does not provide an OAuth login flow to ChatGPT. Cloudflare Access may intercept requests before the Worker, so both edge Access and in-Worker authorization need integration tests.
+## Implemented and locally tested
 
-Reference: https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/secure-mcp-servers/
+- [x] The callback verifies OIDC discovery and configured endpoints before trusting the SaaS OIDC ID token.
+- [x] The callback requires RS256 and validates signature, issuer, audience, expiry, not-before, subject, and allowlisted email.
+- [x] The callback uses a configured public URL rather than the incoming Host header.
+- [x] Pipeline, workflow, and job requests are scoped to `CIRCLE_PROJECT_SLUG` by validating parent ownership.
+- [x] Log output URLs are restricted to HTTPS CircleCI artifact hosts, fetched without redirects, and size bounded.
+- [x] The MCP server registers read-only pipeline, workflow, job-detail, and log tools only.
+- [x] Unit tests use generated signing keys and mocked API responses; they do not call live services or trigger pipelines.
+
+## Still required before deployment
+
+- [ ] Install dependencies and generate the lockfile.
+- [ ] Run `npm run check`, `npm test`, and `npx wrangler deploy --dry-run` from the checked-out project.
+- [ ] Review lockfile/package compatibility and confirm the Cloudflare OAuth Provider version/migration path.
+- [ ] Verify live Access OIDC discovery metadata and JWKS for the SaaS application.
+- [ ] Verify the Access SaaS and self-hosted policies and their actual enforcement.
+- [ ] Confirm the self-hosted application does not prevent OAuth discovery, client registration, authorization, token exchange, callback, or MCP requests.
+- [ ] Confirm `OAUTH_KV`, the Durable Object binding and migration, Worker URL, callback URL, and encrypted secret bindings for the intended account and Worker.
+- [ ] Test anonymous requests, wrong identity, invalid/expired token, MCP initialization, tool listing, and read-only CircleCI calls in a safe environment.
+- [ ] Review the legacy CircleCI v1.1 log-output behavior and artifact host formats against the actual project.
+- [ ] Deploy only after every preceding gate passes. Do not deploy this isolated working copy from the current session.
+
+## Explicitly out of scope for this release
+
+- [x] Pipeline triggering, cancellation, approval, and rerun tools are absent.
+- [ ] Do not implement or enable triggering until authenticated read-only calls pass end-to-end review and the user separately authorizes the trigger milestone.
+- [ ] Do not claim ChatGPT connectivity until a real ChatGPT MCP connection has been completed.
+
+## Evidence recorded for this turn
+
+- `npm test`: 16 tests passed, 0 failed; test calls were mocked/local.
+- `npm install`: blocked by `ENOTFOUND registry.npmjs.org`; no dependency lockfile was generated.
+- `npm run check`: not run because dependencies are unavailable.
+- Wrangler dry run: not run because dependencies are unavailable.
+- Production deploy: not performed.
+- Live OIDC / CircleCI calls: not performed.

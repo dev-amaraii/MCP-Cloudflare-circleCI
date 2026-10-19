@@ -4,6 +4,9 @@ compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
+[vars]
+MCP_PUBLIC_URL = "https://nen-circleci-mcp.devops-948.workers.dev"
+
 [[kv_namespaces]]
 binding = "OAUTH_KV"
 id = "b27a78e5d8a8447ea233f0e7c92459d4"
