@@ -57,9 +57,9 @@ export async function verifyAccessIdToken(
   // types permit SharedArrayBuffer, so copy explicitly instead of asserting.
   const signature = new Uint8Array(new ArrayBuffer(jwt.signature.byteLength));
   signature.set(jwt.signature);
-  const data = new TextEncoder().encode(jwt.data);
+  const signedData = new TextEncoder().encode(jwt.data);
   const signed = await crypto.subtle.verify(
-    "RSASSA-PKCS1-v1_5", key, signature.buffer, data.buffer,
+    "RSASSA-PKCS1-v1_5", key, signature.buffer, signedData.buffer,
   );
   if (!signed) throw new Error("Invalid JWT signature");
   validateOidcClaims(jwt.claims, issuer, env.ACCESS_CLIENT_ID, "devops@amaraii.com", now);
