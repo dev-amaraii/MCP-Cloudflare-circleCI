@@ -25,7 +25,9 @@ export function consumeNonceOnce(
 }
 
 export class OAuthReplayGuard {
-  constructor(private readonly state: DurableObjectState) {
+  private readonly state: DurableObjectState;
+  constructor(state: DurableObjectState) {
+    this.state = state;
     state.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS oauth_consumed_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)",
     );
