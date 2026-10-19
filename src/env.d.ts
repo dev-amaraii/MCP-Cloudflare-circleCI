@@ -1,5 +1,6 @@
 interface Env {
   OAUTH_KV: KVNamespace;
+  OAUTH_REPLAY_GUARD: DurableObjectNamespace;
   MCP_OBJECT: DurableObjectNamespace;
   CIRCLE_TOKEN: string;
   CIRCLE_PROJECT_SLUG: string;
