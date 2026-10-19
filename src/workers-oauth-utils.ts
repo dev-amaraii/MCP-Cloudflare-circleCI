@@ -944,6 +944,7 @@ export async function fetchUpstreamAuthToken(params: {
 
 	const response = await fetch(params.upstream_url, {
 		method: "POST",
+		redirect: "error", // never forward client credentials across upstream redirects
 		headers: {
 			"Content-Type": "application/x-www-form-urlencoded",
 			Accept: "application/json",
