@@ -14,12 +14,14 @@ export class OAuthError extends Error {
 	 * @param description - Human-readable error description
 	 * @param statusCode - HTTP status code to return (defaults to 400)
 	 */
-	constructor(
-		public code: string,
-		public description: string,
-		public statusCode = 400,
-	) {
+	code: string;
+	description: string;
+	statusCode: number;
+	constructor(code: string, description: string, statusCode = 400) {
 		super(description);
+		this.code = code;
+		this.description = description;
+		this.statusCode = statusCode;
 		this.name = "OAuthError";
 	}
 
