@@ -197,8 +197,8 @@ async function hashOAuthState(stateToken: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stateToken));
   const bytes = new Uint8Array(digest);
   return btoa(String.fromCharCode(...bytes))
-    .replace(/\\+/g, "-")
-    .replace(/\\//g, "_")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
     .replace(/=+$/, "");
 }
 
