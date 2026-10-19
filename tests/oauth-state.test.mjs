@@ -10,6 +10,20 @@ import {
 
 const SECRET = "test-ONLY-32-byte-cryptographic-secret";
 const requestFor = (state) => new Request("https://nen.example/callback?state=" + encodeURIComponent(state));
+const fakeGuard = () => {
+  const used = new Set();
+  return {
+    idFromName: (name) => name,
+    get: () => ({
+      fetch: async (request) => {
+        const nonce = await request.text();
+        if (used.has(nonce)) return new Response(null, { status: 409 });
+        used.add(nonce);
+        return new Response(null, { status: 204 });
+      },
+    }),
+  };
+};
 const fakeKV = () => {
   const data = new Map();
   return {
@@ -22,26 +36,40 @@ const fakeKV = () => {
 
 test("signed OAuth state binds original client request and is consumed", async () => {
   const kv = fakeKV();
+  const guard = fakeGuard();
   const original = { clientId: "original-approved-client", redirectUri: "https://app.example/callback", scope: ["read"] };
   const { stateToken, codeChallenge } = await createOAuthState(original, kv, SECRET);
   assert.ok(codeChallenge.length > 24);
-  const result = await validateOAuthState(requestFor(stateToken), kv, SECRET);
+  const result = await validateOAuthState(requestFor(stateToken), kv, SECRET, guard);
   assert.deepEqual(result.oauthReqInfo, original);
   assert.ok(result.codeVerifier.length > 32);
-  await assert.rejects(validateOAuthState(requestFor(stateToken), kv, SECRET), /state/);
+  await assert.rejects(validateOAuthState(requestFor(stateToken), kv, SECRET, guard), /state/);
 });
 test("tampering with signed state fails before touching storage", async () => {
   const kv = fakeKV();
+  const guard = fakeGuard();
   const { stateToken } = await createOAuthState({ clientId: "good" }, kv, SECRET);
   const bad = (stateToken[0] === "f" ? "e" : "f") + stateToken.slice(1);
   const storedBefore = kv.data.size;
-  await assert.rejects(validateOAuthState(requestFor(bad), kv, SECRET), /signature/);
+  await assert.rejects(validateOAuthState(requestFor(bad), kv, SECRET, guard), /signature/);
   assert.equal(kv.data.size, storedBefore);
 });
 test("unknown, missing, or malformed OAuth state is rejected", async () => {
   const kv = fakeKV();
-  await assert.rejects(validateOAuthState(new Request("https://nen.example/callback"), kv, SECRET));
-  await assert.rejects(validateOAuthState(requestFor("invalid"), kv, SECRET));
+  const guard = fakeGuard();
+  await assert.rejects(validateOAuthState(new Request("https://nen.example/callback"), kv, SECRET, guard));
+  await assert.rejects(validateOAuthState(requestFor("invalid"), kv, SECRET, guard));
+});
+test("simultaneous callbacks cannot both claim a signed nonce", async () => {
+  const kv = fakeKV();
+  const guard = fakeGuard();
+  const { stateToken } = await createOAuthState({ clientId: "good" }, kv, SECRET);
+  const calls = await Promise.allSettled([
+    validateOAuthState(requestFor(stateToken), kv, SECRET, guard),
+    validateOAuthState(requestFor(stateToken), kv, SECRET, guard),
+  ]);
+  assert.equal(calls.filter(c => c.status === "fulfilled").length, 1);
+  assert.equal(calls.filter(c => c.status === "rejected").length, 1);
 });
 test("authorization consent form requires matching double-submit CSRF", () => {
   const { token, setCookie } = generateCSRFProtection();
