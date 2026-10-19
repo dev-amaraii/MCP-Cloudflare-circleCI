@@ -31,9 +31,9 @@ The active source uses SDK Web Standard Streamable HTTP directly and verifies RS
 
 ## Pending interactive access and deployment
 
-Local Wrangler authentication was expired. A normal Worker-scoped OAuth refresh was opened for the owner. No deployment may be claimed until authentication and a manual deployment succeed. The old deployed Worker version is `957d1b68-32ee-4757-ba9b-daaf78a94229`.
+Local Wrangler authentication was expired. A normal Worker-scoped OAuth refresh was opened for the owner. No deployment may be claimed until authentication and a manual deployment succeed. The first deployment login refresh timed out; a replacement flow was opened for the owner. The old deployed Worker version is `957d1b68-32ee-4757-ba9b-daaf78a94229`.
 
-A Codex connection setup was started; registration alone does not prove authentication or operation. ChatGPT connection, signed-in OAuth, deployed MCP tool calls and live CircleCI API access remain pending.
+Codex connection `nen-circleci` was added to the existing global configuration. Its real OAuth authorization-code/PKCE flow completed successfully (`Successfully logged in` from the CLI). This proves client registration and owner OAuth sign-in, not deployed origin initialization: the Worker deployment is still pending. ChatGPT connection, deployed MCP tool calls and live CircleCI API access remain pending.
 
 The configured project uses a `circleci/...` identifier. Its mapping to this GitHub repo is not yet verified. CircleCI's browser view requires login. The current v1.1 log implementation accepts only gh/bb projects; this limitation remains a release acceptance item, rather than being hidden behind a passing mock test.
 

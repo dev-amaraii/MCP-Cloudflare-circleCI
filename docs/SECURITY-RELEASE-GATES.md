@@ -23,7 +23,8 @@ Current architecture: Access Managed OAuth with a signed-assertion, stateless St
 - [x] Existing sole `devops@amaraii.com` allow policy and Worker destination verified unchanged.
 - [x] Live OAuth discovery returns 200 JSON and anonymous `/mcp` returns 401 with OAuth metadata challenge.
 - [x] Live registration accepts localhost and approved ChatGPT callback, rejects an unapproved external callback.
-- [ ] Verify a real owner OAuth login and wrong-identity denial end to end.
+- [x] Verify a real Codex owner OAuth authorization-code/PKCE login.
+- [ ] Verify actual wrong-identity login denial end to end.
 
 ## Manual deployment and acceptance
 
