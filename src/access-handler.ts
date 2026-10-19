@@ -51,9 +51,8 @@ export async function handleAccessRequest(
 			client: await env.OAUTH_PROVIDER.lookupClient(clientId),
 			csrfToken,
 			server: {
-				description: "This is a demo MCP Remote Server using Access for authentication.",
-				logo: "https://avatars.githubusercontent.com/u/314135?s=200&v=4",
-				name: "Cloudflare Access MCP Server",
+				description: "NEN CircleCI MCP — read-only CI diagnostics. No pipelines may be triggered.",
+				name: "NEN CircleCI MCP",
 			},
 			setCookie,
 			state: { approvalStateToken },
@@ -114,7 +113,7 @@ export async function handleAccessRequest(
 
 			return redirectToAccess(request, env, stateToken, codeChallenge, redirectHeaders);
 		} catch (error: any) {
-			console.error("POST /authorize error:", error);
+			// Do not log request state, cookies, or OAuth error contents.
 			if (error instanceof OAuthError) {
 				return error.toResponse();
 			}
@@ -149,14 +148,20 @@ export async function handleAccessRequest(
 		}
 
 		// Exchange the code for an access token, including the PKCE verifier
-		const [_accessToken, idToken, errResponse] = await fetchUpstreamAuthToken({
+		let tokenExchange: Awaited<ReturnType<typeof fetchUpstreamAuthToken>>;
+		try {
+			tokenExchange = await fetchUpstreamAuthToken({
 			client_id: env.ACCESS_CLIENT_ID,
 			client_secret: env.ACCESS_CLIENT_SECRET,
 			code: searchParams.get("code") ?? undefined,
 			redirect_uri: new URL("/callback", request.url).href,
 			upstream_url: env.ACCESS_TOKEN_URL,
 			code_verifier: codeVerifier,
-		});
+			});
+		} catch {
+			return new Response("Upstream authentication unavailable", { status: 502 });
+		}
+		const [_accessToken, idToken, errResponse] = tokenExchange;
 		if (errResponse) {
 			return errResponse;
 		}
