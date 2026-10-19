@@ -15,28 +15,29 @@ The source uses Cloudflare Workers OAuth Provider with client registration, cons
 Security improvements staged in GitHub:
 - Exact **path-scoped** Access for SaaS issuer, derived from the configured authorization endpoint and checked against team domain, client ID, token endpoint and JWKS endpoint. Using just `new URL(issuer).origin` would reject valid SaaS ID tokens.
 - RS256-only ID-token signature verification, explicit key ID and unique RSA JWKS key, pinned JWKS URL, and issuer/audience/authorized party, expiration, issued-at, not-before, subject and allowed email validation.
-- Signed, single-use KV approval state: no unsigned authorization request objects are accepted from a consent form. Existing form CSRF token retained.
-- Upstream OAuth error text redacted. Upstream Access token is no longer persisted inside MCP props.
+- Signed, single-use KV approval state: no unsigned authorization request objects are accepted from a consent form. Existing form CSRF token retained. The upstream callback additionally requires the browser-scoped `__Host-OAUTH_STATE` HttpOnly/Secure/Lax cookie before consuming its nonce; the cookie is cleared on successful authorization. Single flight per browser is assumed; concurrent initiations may invalidate the earlier flow rather than silently accept the wrong session.
+- Upstream OAuth error text redacted. Upstream Access token is no longer persisted inside MCP props. The token POST explicitly sets `redirect: error` to prevent forwarding client credentials on 307/308 redirects.
 - Read-only tools are project-scoped: `circleci_pipeline_status`, `circleci_pipeline_workflows`, `circleci_workflow_jobs`, `circleci_job_details`. Trigger remains intentionally absent.
 
-Three isolated test files (`access-oidc`, `circleci-read`, `oauth-replay-guard`) were executed as exact GitHub blob copies: **49/49 passing**. A real SQLite 20-attempt concurrency test accepted exactly one nonce. The separate `oauth-state` integration test file and full dependency-driven Worker typecheck remain **unexecuted**. There is no lockfile and no deployment authorization.
+Three isolated test files (`access-oidc`, `circleci-read`, `oauth-replay-guard`) were executed as exact GitHub blob copies: **49/49 passing**. A real SQLite 20-attempt concurrency test accepted exactly one nonce. The `oauth-state` suite additionally passed **10/10** when run on the latest GitHub source in a temporary JavaScript harness with TypeScript types removed and test-only adapters. The new HTTP authorization-handler tests passed JavaScript syntax checks only and have **not been executed**. The **full** native `npm test`, dependency install, and Worker typecheck remain **unexecuted**. There is no lockfile and no deployment authorization.
 
 ## Release and integration steps
 
 1. Lock and audit dependencies, use Node >=22.18, run `npm run check` and `npm test` including `oauth-state` tests. The local isolated test runtime was Node 22.16 with experimental TS stripping and a focused TypeScript check using test-only Cloudflare type shims. **Neither substitutes for a full Worker compile.**
-2. Validate the new singleton SQLite Durable Object `OAuthReplayGuard`, `OAUTH_REPLAY_GUARD` binding and v2 migration under workerd/Miniflare. Existing OAuth KV namespace `b27a78e5d8a8447ea233f0e7c92459d4` exists in the account but is **not bound on the live Worker**. No Durable Object namespaces were returned by the live account lookup.
-3. Inspect OIDC discovery issuer and values in SaaS app without exposing credentials. The ID token's `iss` must be the full `https://<team>.cloudflareaccess.com/cdn-cgi/access/sso/oidc/<client-id>` issuer; `aud` must identify the exact SaaS client.
-4. Test the existing self-hosted Access application against OAuth discovery, `/authorize`, `/callback`, `/register`, `/token`, and `/mcp`. Access could intercept client discovery even if the SaaS app is configured. Do **not** disable protection merely to get a connection.
-5. Deploy only after security-review approval. Verify unauthenticated denial, no open redirects, cookie and PKCE behavior, correct user allowlist, and callback replay denial. Exercise ChatGPT registration and initial read-only tools.
-6. Verify the previously successful CircleCI pipeline/workflow and job metadata; ensure foreign-project UUIDs fail.
-7. Implement mutating pipeline trigger **separately**, with approval, project and branch allowlists, audit logging, rate limiting, and explicit per-execution confirmation. Keep remote CI on demand.
+2. Exercise the `__Host-OAUTH_STATE` cookie, the newly added first-time/previously-approved client flow tests, and upstream redirect rejection in workerd; route and cookie behavior have not been tested against the actual Access application.
+3. Validate the new singleton SQLite Durable Object `OAuthReplayGuard`, `OAUTH_REPLAY_GUARD` binding and v2 migration under workerd/Miniflare. Existing OAuth KV namespace `b27a78e5d8a8447ea233f0e7c92459d4` exists in the account but is **not bound on the live Worker**. No Durable Object namespaces were returned by the live account lookup.
+4. Inspect OIDC discovery issuer and values in SaaS app without exposing credentials. The ID token's `iss` must be the full `https://<team>.cloudflareaccess.com/cdn-cgi/access/sso/oidc/<client-id>` issuer; `aud` must identify the exact SaaS client.
+5. Test the existing self-hosted Access application against OAuth discovery, `/authorize`, `/callback`, `/register`, `/token`, and `/mcp`. Access could intercept client discovery even if the SaaS app is configured. Do **not** disable protection merely to get a connection.
+6. Deploy only after security-review approval. Verify unauthenticated denial, no open redirects, cookie and PKCE behavior, correct user allowlist, and callback replay denial. Exercise ChatGPT registration and initial read-only tools.
+7. Verify the previously successful CircleCI pipeline/workflow and job metadata; ensure foreign-project UUIDs fail.
+8. Implement mutating pipeline trigger **separately**, with approval, project and branch allowlists, audit logging, rate limiting, and explicit per-execution confirmation. Keep remote CI on demand.
 
 ## Remaining risks / unknowns
 
 - **Mitigation staged, not deployed:** OAuth state validation now requires `claimStateOnce` against a singleton SQLite-backed Durable Object, using an atomic unique-nonce insert. Replay-guard unit tests (5/5) and a 20-request SQLite race check passed. Workerd/runtime migration and end-to-end OAuth tests are still required.
-- Self-hosted Access route interception versus OAuth discovery has not been tested in a browser or ChatGPT.
-- Cookie/session binding and external redirect allowlist require an end-to-end test.
-- Test execution, dependency lock, deployment and Chargeable CI verification remain outstanding.
+- Self-hosted Access route interception versus OAuth discovery has not been tested in a browser or ChatGPT. A read-only fetch from this tool's restricted environment returned its own outbound-policy 403 (`Forbidden: requests ... are not allowed`), **not evidence that Cloudflare Access responded 403**.
+- Cookie/session binding and upstream redirect denial are now implemented and unit-smoke-checked, but require real browser/Worker end-to-end tests.
+- Full suite execution, dependency lock, deployment and chargeable CI verification remain outstanding.
 - Raw step logs may contain secrets and pre-signed temporary URLs; do not expose raw output until a guarded retrieval/redaction design is reviewed.
 
 References:
