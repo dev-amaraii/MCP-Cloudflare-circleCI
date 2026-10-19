@@ -33,7 +33,7 @@ test("signed OAuth state binds original client request and is consumed", async (
 test("tampering with signed state fails before touching storage", async () => {
   const kv = fakeKV();
   const { stateToken } = await createOAuthState({ clientId: "good" }, kv, SECRET);
-  const bad = "f" + stateToken.slice(1);
+  const bad = (stateToken[0] === "f" ? "e" : "f") + stateToken.slice(1);
   const storedBefore = kv.data.size;
   await assert.rejects(validateOAuthState(requestFor(bad), kv, SECRET), /signature/);
   assert.equal(kv.data.size, storedBefore);
