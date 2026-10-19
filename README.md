@@ -25,6 +25,20 @@ IDs are identifiers, **not credentials**. Never commit or print the CircleCI tok
 
 On-demand CircleCI validation is staged in [`.circleci/config.yml`](.circleci/config.yml). It defines two **disabled-by-default** parameter-gated workflows: `bootstrap_lockfile=true` produces a reviewed `package-lock.json` artifact, and `run_validation=true` runs `npm ci`, the full TypeScript check and tests, and a Wrangler **dry run**. See [Remote validation runbook](docs/REMOTE-VALIDATION.md) for the CircleCI GitHub App project connection, disabling default push triggers, and manual trigger parameters. **CircleCI project is connected and GitHub push trigger disabled. Bootstrap #34 succeeded. Manual validation #37 succeeded on `fb1b6dc1` in 31 seconds, including `npm ci`, `npm run check`, all tests and Wrangler dry-run. No deployment or PR merge. Next: approve and exercise an isolated Cloudflare staging integration, after a separate security review.**
 
+## Isolated staging preparation (not deployed)
+
+The [staging-readiness plan](docs/STAGING-READINESS.md) and
+[`wrangler.staging.example.toml`](wrangler.staging.example.toml) are prepared.
+They specify a **distinct** `nen-circleci-mcp-staging` Worker, a new OAuth KV
+namespace and new SQLite Durable Object namespaces. The example defaults to
+`workers_dev = false` with no public routes and an invalid placeholder KV ID.
+The resource-bound `wrangler.staging.toml` is gitignored.
+
+**No staging resources, Access applications or secrets have been created,
+and no Worker has been deployed.** Cloudflare staging creation and activation
+require separate explicit approval. This does not affect the verified CI #37
+or authorize any production changes.
+
 ## Local/isolated security validation before deployment
 
 Requires Node >=22.18 (native TypeScript type stripping). **The refreshed lockfile from CircleCI #34 is committed at `fe9cbb97` (Git blob `483b7c0f8a0f4f14ffc212c3935741210fc83224`) and matches `package.json`. It pins MCP SDK `1.29.0` without nested duplicate SDKs. Those CI checks all passed in manually triggered CircleCI pipeline #37 on `fb1b6dc1`; this is not a live OAuth integration test.** 49 tests covering OIDC/JWT, CircleCI project scoping and replay-guard nonce consumption passed in an isolated Node 22.16 runtime using `--experimental-strip-types`; the `oauth-state.test.mjs` suite additionally passed **10/10 in an isolated JavaScript harness** (runtime TypeScript stripping, test-only stubs, exact GitHub source and test blobs). The native OAuth handler tests, including corrected consent-cookie assertions, passed in CircleCI #37. **Full Worker `npm run check`, `npm test`, and Wrangler `deploy --dry-run` all passed on commit `fb1b6dc1`.** Live workerd callback/Access/OAuth connectivity remains unverified.
