@@ -892,25 +892,19 @@ export async function fetchUpstreamAuthToken(params: {
 	});
 
 	if (!response.ok) {
-		const errorText = await response.text();
-		return [
-			null,
-			null,
-			new Response(`Failed to exchange code for token: ${errorText}`, {
-				status: response.status,
-			}),
-		];
+		// Never relay an upstream body (which can contain sensitive diagnostics).
+		return [null, null, new Response("Upstream authentication failed", { status: 502 })];
 	}
 
 	const body = (await response.json()) as any;
 
-	const accessToken = body.access_token as string;
-	if (!accessToken) {
+	const accessToken = body?.access_token;
+	if (typeof accessToken !== "string" || !accessToken) {
 		return [null, null, new Response("Missing access token", { status: 400 })];
 	}
 
-	const idToken = body.id_token as string;
-	if (!idToken) {
+	const idToken = body?.id_token;
+	if (typeof idToken !== "string" || !idToken) {
 		return [null, null, new Response("Missing id token", { status: 400 })];
 	}
 	return [accessToken, idToken, null];
@@ -920,7 +914,6 @@ export async function fetchUpstreamAuthToken(params: {
  * Props interface for upstream provider user data
  */
 export interface Props {
-	accessToken: string;
 	email: string;
 	login: string;
 	name: string;
