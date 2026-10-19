@@ -11,10 +11,10 @@ change Cloudflare Access settings, or trigger CircleCI automatically.
   `bootstrap_lockfile` and `run_validation`.
 - Both workflow jobs use the Node 24.13 CircleCI image, with no CircleCI
   contexts, Cloudflare credentials, GitHub write token, or CircleCI token.
-- **Lockfile regeneration REQUIRED:** The reviewed v3 lockfile from commit `052a61c9` still records MCP SDK `1.32.1` at the root and `1.29.0` nested under `agents`. Pipeline #33 reached `npm run check` and failed with three TypeScript errors, including incompatible MCP SDK private-type declarations. The branch now pins SDK `1.29.0` but its committed lockfile is **stale**. Do not run `run_validation=true` until a new reviewed lockfile artifact has been committed.
+- **Lockfile regeneration COMPLETED:** CircleCI bootstrap pipeline **#34** succeeded on `fix/oauth-claims-hardening`, checking the aligned SDK version and uploading an artifact. The user supplied this lockfile, which passed manifest, single-SDK and registry/integrity metadata checks; the new `package-lock.json` was committed at `fe9cbb97ade30c42025b57b26999dbf3a7d1dfeb` (blob `483b7c0f8a0f4f14ffc212c3935741210fc83224`). Next run is manual full validation, **not** another bootstrap.
 - Config YAML was parsed locally and manual-guard defaults were inspected.
   This is **not** a CircleCI config compile, pipeline execution or full test pass.
-- The user completed the first bootstrap and manually ran CircleCI **validation #33**, which failed at `npm run check`: missing `node:buffer` typings, WebCrypto `BufferSource` type mismatch, and two separately installed MCP SDK versions. Source fixes and a manual lockfile-refresh job are staged; these fixes remain unverified by full CircleCI.
+- CircleCI **validation #33** failed at `npm run check` (missing Node typings, WebCrypto `BufferSource` mismatch and duplicate MCP SDK). Source fixes were committed, and subsequent CircleCI **bootstrap #34 passed** and produced the corrected single-SDK lockfile. Full TypeScript checks, tests and Wrangler dry-run **have not yet passed** for the corrected branch.
 
 ## 1. One-time CircleCI project setup (requires CircleCI web UI)
 
@@ -43,7 +43,7 @@ Official references:
 - https://circleci.com/docs/guides/orchestrate/set-up-triggers/
 - https://circleci.com/docs/guides/orchestrate/triggers-overview/
 
-## 2. Generate or refresh the npm lockfile (NEXT — required after SDK pin)
+## 2. Generate or refresh the npm lockfile (COMPLETED in pipeline #34)
 
 **Requires a separately approved CircleCI execution.** In the CircleCI web
 app select the MCP project → **Trigger Pipeline** and use:
@@ -58,9 +58,9 @@ The `export_lockfile` job executes only
 in an ephemeral CircleCI container and exports **package-lock.json**
 as a CircleCI artifact. No dependency scripts and no deploy are run.
 
-**Refresh required:** The old artifact was reviewed and committed, but `package.json` has since pinned `@modelcontextprotocol/sdk` to `1.29.0`. A new manual `bootstrap_lockfile=true` run regenerates the lockfile from scratch in an ephemeral CircleCI container and **rejects duplicate MCP SDK installs**. Upload its updated artifact so it can be reviewed and committed. Do not hand-edit dependency resolution or bypass peer checks.
+**Refresh completed:** The artifact produced by CircleCI pipeline #34 was reviewed and committed. The new npm lockfile v3 contains 290 package records, a single root MCP SDK `1.29.0`, and 289 resolved registry packages with SHA-512 integrity metadata. GitHub readback confirms blob SHA `483b7c0f8a0f4f14ffc212c3935741210fc83224`. Do not rerun bootstrap unless dependencies change.
 
-## 3. Run full validation — AFTER refreshed lockfile is reviewed and committed
+## 3. Run full validation — NEXT: after successful bootstrap #34
 
 Again, **requires a separately approved CircleCI execution**.
 Trigger Pipeline with the same two branches and:
