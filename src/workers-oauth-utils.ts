@@ -190,6 +190,43 @@ export function sanitizeUrl(url: string): string {
 	return normalized;
 }
 
+const STATE_COOKIE_NAME = "__Host-OAUTH_STATE";
+
+/** A browser-session-only fingerprint, never the state token itself. */
+async function hashOAuthState(stateToken: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stateToken));
+  const bytes = new Uint8Array(digest);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\\+/g, "-")
+    .replace(/\\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/** Called on every redirect to Access (including previously approved MCP clients). */
+export async function bindOAuthStateCookie(stateToken: string): Promise<string> {
+  const fingerprint = await hashOAuthState(stateToken);
+  return `${STATE_COOKIE_NAME}=${fingerprint}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=600`;
+}
+
+export function clearOAuthStateCookie(): string {
+  return `${STATE_COOKIE_NAME}=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0`;
+}
+
+/** Prevent login CSRF by checking browser continuity before consuming one-time state. */
+export async function validateOAuthStateCookie(request: Request, stateToken: string): Promise<void> {
+  const cookie = request.headers.get("Cookie")?.split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith(`${STATE_COOKIE_NAME}=`));
+  const received = cookie?.slice(STATE_COOKIE_NAME.length + 1);
+  if (!received || !/^[A-Za-z0-9_-]{43}$/.test(received)) {
+    throw new OAuthError("invalid_request", "Missing OAuth session cookie", 400);
+  }
+  const expected = await hashOAuthState(stateToken);
+  if (received !== expected) {
+    throw new OAuthError("invalid_request", "OAuth session cookie mismatch", 400);
+  }
+}
+
 /**
  * Generates a new CSRF token and corresponding cookie for form protection
  * @returns Object containing the token and Set-Cookie header value
@@ -285,6 +322,7 @@ export async function validateOAuthState(
 	kv: KVNamespace,
 	secret: string,
 	replayGuard: DurableObjectNamespace,
+	requireSessionCookie = false,
 ): Promise<ValidateStateResult> {
 	const url = new URL(request.url);
 	const stateFromQuery = url.searchParams.get("state");
@@ -305,6 +343,10 @@ export async function validateOAuthState(
 	if (!isValid) {
 		throw new OAuthError("invalid_request", "Invalid state signature", 400);
 	}
+
+	// The upstream callback must originate from the browser that started login.
+	// Consent POST already has a separate double-submit CSRF cookie and signed state.
+	if (requireSessionCookie) await validateOAuthStateCookie(request, stateFromQuery);
 
 	// Look up by UUID only after signature is verified
 	const storedDataJson = await kv.get(`oauth:state:${uuid}`);
