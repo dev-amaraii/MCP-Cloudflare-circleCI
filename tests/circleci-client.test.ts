@@ -142,3 +142,36 @@ test("calls the runtime fetch primitive with its global receiver", async () => {
  });
  assert.equal((await api.getPipeline(pipelineId)).id,pipelineId);
 });
+
+for (const mismatch of [false, true]) test(`modern log API checks ownership and bounds streams (mismatch=${mismatch})`, async () => {
+ const slug = 'circleci/org/project';
+ const projectId = '42345678-1234-1234-1234-123456789abc';
+ let streams = 0;
+ const api = new CircleCIClient({CIRCLE_TOKEN:'test-token',CIRCLE_PROJECT_SLUG:slug},async(input,init)=>{
+  const url = new URL(String(input));
+  const headers = new Headers(init?.headers);
+  assert.equal(init?.redirect,'manual');
+  if(url.pathname===`/api/v2/workflow/${workflowId}`) return Response.json({pipeline_id:pipelineId});
+  if(url.pathname===`/api/v2/pipeline/${pipelineId}`) return Response.json({project_slug:slug});
+  if(url.pathname===`/api/v2/workflow/${workflowId}/job`) return Response.json({items:[{id:jobId,job_number:1}]});
+  if(url.pathname==='/api/v2/project/'+slug) return Response.json({id:projectId});
+  assert.equal(headers.get('Authorization'),'Bearer test-token');
+  assert.equal(headers.has('Circle-Token'),false);
+  if(url.pathname===`/api/v3/jobs/${jobId}`) return Response.json({data:{id:jobId,references:{project:{id:mismatch?pipelineId:projectId},workflow:{id:workflowId}},attributes:{parallel_executions:[{steps:Array.from({length:30},(_,num)=>({num,name:'Tests'}))}]}}});
+  assert.equal(url.origin,'https://circleci.com');
+  assert.equal(url.searchParams.get('filter[execution]'),'0');
+  assert.match(url.searchParams.get('filter[step_num]')!,/^\d+$/);
+  streams++;
+  if(url.pathname.endsWith('/stderr')) return new Response(null,{status:404});
+  return new Response(new Uint8Array(30_000).fill(255),{status:206,headers:{'Content-Range':'bytes 0-23999/30000'}});
+ });
+ if(mismatch){await assert.rejects(api.getJobLogs(workflowId,jobId),/does not belong/);assert.equal(streams,0);}
+ else {
+  const logs=await api.getJobLogs(workflowId,jobId);
+  assert.ok(streams<=20);
+  assert.ok(logs.steps.length<=20);
+  assert.ok(logs.steps.reduce((n,s)=>n+new TextEncoder().encode(s.output).length,0)<=120000);
+  assert.ok(logs.steps.every(s=>new TextEncoder().encode(s.output).length<=24000));
+  assert.ok(logs.steps.some(s=>s.truncated));
+ }
+});

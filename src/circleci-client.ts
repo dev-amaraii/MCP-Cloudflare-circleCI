@@ -94,12 +94,12 @@ export class CircleCIClient {
 		this.fetcher = fetcher.bind(globalThis);
 	}
 
-	private async getJson(url: string): Promise<unknown> {
+	private async getJson(url: string, modern = false): Promise<unknown> {
 		let response: Response;
 		try {
 			response = await this.fetcher(url, {
 				method: "GET",
-				headers: { "Circle-Token": this.env.CIRCLE_TOKEN, Accept: "application/json" },
+				headers: modern ? { Authorization: `Bearer ${this.env.CIRCLE_TOKEN}`, Accept: "application/json" } : { "Circle-Token": this.env.CIRCLE_TOKEN, Accept: "application/json" },
 				signal: AbortSignal.timeout(10_000),
 				redirect: "manual",
 			});
@@ -212,6 +212,7 @@ export class CircleCIClient {
 
 	async getJobLogs(workflowId: string, jobId: string): Promise<{ job_id: string; steps: Array<{ name: string; output: string; truncated: boolean }> }> {
 		const job = await this.findJob(workflowId, jobId);
+		if (this.env.CIRCLE_PROJECT_SLUG.startsWith("circleci/")) return this.getModernJobLogs(workflowId, jobId);
 		const legacyProjectPath = this.legacyProjectPath();
 		const jobDetails = asRecord(await this.getJson(`${API_V1}${legacyProjectPath}/${job.job_number}`));
 		if (!Array.isArray(jobDetails.steps)) throw new CircleCIError("CircleCI did not return job log steps for this project");
@@ -239,6 +240,39 @@ export class CircleCIClient {
 		return { job_id: jobId, steps };
 	}
 
+	private async getModernJobLogs(workflowId: string, jobId: string): Promise<{ job_id: string; steps: Array<{ name: string; output: string; truncated: boolean }> }> {
+		// Membership in the project-owned workflow was checked by findJob before this call.
+		const project = asRecord(await this.getV2(`/project/${this.projectPath}`));
+		const data = asRecord(asRecord(await this.getJson(`https://circleci.com/api/v3/jobs/${jobId}`, true)).data);
+		const refs = asRecord(data.references);
+		if (typeof project.id !== "string" || !isValidUuid(project.id) || data.id !== jobId ||
+			asRecord(refs.project).id !== project.id || asRecord(refs.workflow).id !== workflowId) {
+			throw new CircleCIError("CircleCI log job does not belong to the selected project and workflow");
+		}
+		const attributes = asRecord(data.attributes);
+		if (!Array.isArray(attributes.parallel_executions)) throw new CircleCIError("CircleCI did not return job log executions");
+		const steps: Array<{ name: string; output: string; truncated: boolean }> = [];
+		let totalBytes = 0;
+		for (const [execution, rawExecution] of attributes.parallel_executions.slice(0, MAX_LOG_STEPS).entries()) {
+			const executionSteps = asRecord(rawExecution).steps;
+			if (!Array.isArray(executionSteps)) continue;
+			for (const rawStep of executionSteps.slice(0, MAX_LOG_STEPS)) {
+				const step = asRecord(rawStep);
+				if (!Number.isSafeInteger(step.num) || (step.num as number) < 0) continue;
+				for (const stream of ["stdout", "stderr"]) {
+					if (steps.length >= MAX_LOG_STEPS || totalBytes >= MAX_TOTAL_LOG_BYTES) return { job_id: jobId, steps };
+					const url = new URL(`https://circleci.com/api/v3/jobs/${jobId}/${stream}`);
+					url.searchParams.set("filter[execution]", String(execution));
+					url.searchParams.set("filter[step_num]", String(step.num));
+					const output = await this.readLogOutput(url.href, Math.min(MAX_STEP_BYTES, MAX_TOTAL_LOG_BYTES - totalBytes), true);
+					totalBytes += new TextEncoder().encode(output.text).byteLength;
+					steps.push({ name: `${typeof step.name === "string" ? step.name.slice(0, 180) : "Job step"} (${execution}/${stream})`, output: output.text, truncated: output.truncated });
+				}
+			}
+		}
+		return { job_id: jobId, steps };
+	}
+
 	private legacyProjectPath(): string {
 		const [vcs, org, project] = validateProjectSlug(this.env.CIRCLE_PROJECT_SLUG);
 		const legacyVcs = vcs === "gh" ? "github" : vcs === "bb" ? "bitbucket" : undefined;
@@ -246,18 +280,19 @@ export class CircleCIClient {
 		return `/project/${legacyVcs}/${encodeURIComponent(org!)}/${encodeURIComponent(project!)}`;
 	}
 
-	private async readLogOutput(url: string, limit: number): Promise<{ text: string; truncated: boolean }> {
+	private async readLogOutput(url: string, limit: number, modern = false): Promise<{ text: string; truncated: boolean }> {
 		let response: Response;
 		try {
 			response = await this.fetcher(url, {
 				method: "GET",
-				headers: { Accept: "application/json, text/plain" },
+				headers: modern ? { Authorization: `Bearer ${this.env.CIRCLE_TOKEN}`, Accept: "text/plain", Range: `bytes=0-${limit - 1}` } : { Accept: "application/json, text/plain" },
 				signal: AbortSignal.timeout(10_000),
 				redirect: "manual",
 			});
 		} catch {
 			throw new CircleCIError("Unable to fetch CircleCI job output");
 		}
+		if (modern && response.status === 404) { await response.body?.cancel(); return { text: "", truncated: false }; }
 		if (!response.ok) throw safeError(response.status, response.headers.get("Retry-After"));
 		const declaredLength = Number(response.headers.get("Content-Length"));
 		if (Number.isFinite(declaredLength) && declaredLength > limit) {
@@ -268,7 +303,8 @@ export class CircleCIClient {
 		const reader = response.body.getReader();
 		const chunks: Uint8Array[] = [];
 		let size = 0;
-		let truncated = false;
+		const rangeTotal = response.headers.get("Content-Range")?.match(/\/(\d+)$/)?.[1];
+		let truncated = rangeTotal !== undefined && Number(rangeTotal) > limit;
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) break;
@@ -289,6 +325,13 @@ export class CircleCIClient {
 			output.set(chunk, offset);
 			offset += chunk.byteLength;
 		}
-		return { text: new TextDecoder().decode(output), truncated };
+		let text = new TextDecoder().decode(output);
+		// Invalid UTF-8 and a split final character can expand on re-encoding. Bound the returned text too.
+		const encodedText = new TextEncoder().encode(text);
+		if (encodedText.byteLength > limit) {
+			text = new TextDecoder().decode(encodedText.subarray(0, limit), { stream: true });
+			truncated = true;
+		}
+		return { text, truncated };
 	}
 }
