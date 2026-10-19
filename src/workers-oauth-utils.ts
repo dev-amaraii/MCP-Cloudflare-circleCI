@@ -2,6 +2,7 @@
 // OAuth utility functions with CSRF and state validation security fixes
 
 import type { AuthRequest, ClientInfo } from "@cloudflare/workers-oauth-provider";
+import { claimStateOnce } from "./oauth-replay-guard.ts";
 
 /**
  * OAuth 2.1 compliant error class.
@@ -283,6 +284,7 @@ export async function validateOAuthState(
 	request: Request,
 	kv: KVNamespace,
 	secret: string,
+	replayGuard: DurableObjectNamespace,
 ): Promise<ValidateStateResult> {
 	const url = new URL(request.url);
 	const stateFromQuery = url.searchParams.get("state");
@@ -317,7 +319,21 @@ export async function validateOAuthState(
 		throw new OAuthError("server_error", "Invalid state data", 500);
 	}
 
-	// Delete state from KV (one-time use)
+	if (!stored?.oauthReqInfo?.clientId || typeof stored.codeVerifier !== "string" || !stored.codeVerifier) {
+		throw new OAuthError("server_error", "Invalid stored state", 500);
+	}
+
+	// Cloudflare KV reads/deletes are not atomic: a Durable Object SQL primary key
+	// ensures only one concurrent callback can claim this nonce.
+	let claimed: boolean;
+	try {
+		claimed = await claimStateOnce(replayGuard, uuid);
+	} catch {
+		throw new OAuthError("server_error", "OAuth state validation unavailable", 503);
+	}
+	if (!claimed) {
+		throw new OAuthError("invalid_request", "State already used", 400);
+	}
 	await kv.delete(`oauth:state:${uuid}`);
 
 	return { oauthReqInfo: stored.oauthReqInfo, codeVerifier: stored.codeVerifier };
