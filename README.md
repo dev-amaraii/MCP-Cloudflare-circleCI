@@ -8,7 +8,7 @@ A single-project, private NEN integration for **read-only CircleCI diagnostics**
 - **Access self-hosted:** `NEN CircleCI MCP`, Allow policy for `devops@amaraii.com` only.
 - **Access for SaaS OIDC:** `NEN CircleCI MCP OAuth`, same Allow identity; redirect URL `https://nen-circleci-mcp.devops-948.workers.dev/callback`; scopes `openid email profile`.
 - **Bindings:** CircleCI token, Access OAuth client credentials, Access endpoint URLs, cookie key are secret-type bindings; project slug and definition ID are plaintext. **Binding presence is not evidence of a completed OAuth flow.**
-- **This branch:** source-level fail-closed OIDC issuer/signature validation, consent state protection, and read-only project-scoped pipeline, workflow, and job tools. **49 isolated tests passed (exact GitHub blob hashes verified); full Worker dependency/typecheck and OAuth integration not run; changes not deployed.**
+- **This branch:** source-level fail-closed OIDC issuer/signature validation, consent state protection, and read-only project-scoped pipeline, workflow, and job tools. **49 Node tests and 10 sandboxed OAuth-state unit tests passed; 6 targeted browser-cookie checks passed. Full Worker dependency/typecheck, native full-suite run, and OAuth integration remain unverified; no deployment.**
 
 ## CircleCI identifiers — verified previously
 
@@ -21,7 +21,7 @@ IDs are identifiers, **not credentials**. Never commit or print the CircleCI tok
 
 ## Local/isolated security validation before deployment
 
-Requires Node >=22.18 (native TypeScript type stripping). Dependencies are not lockfile-pinned yet; that is an open release gate. 49 tests covering OIDC/JWT, CircleCI project scoping and replay-guard nonce consumption passed in an isolated Node 22.16 runtime using `--experimental-strip-types`; the remaining `oauth-state.test.mjs` integration suite has not been executed. Full `npm run check` remains pending because dependencies are not available in this execution environment.
+Requires Node >=22.18 (native TypeScript type stripping). Dependencies are not lockfile-pinned yet; that is an open release gate. 49 tests covering OIDC/JWT, CircleCI project scoping and replay-guard nonce consumption passed in an isolated Node 22.16 runtime using `--experimental-strip-types`; the `oauth-state.test.mjs` suite additionally passed **10/10 in an isolated JavaScript harness** (runtime TypeScript stripping, test-only stubs, exact GitHub source and test blobs). The newer `access-handler.test.mjs` has only passed JavaScript syntax parsing and has **not been executed**. Full `npm run check` remains pending because dependencies are not available in this execution environment.
 
 ```sh
 npm install --ignore-scripts
@@ -34,11 +34,12 @@ Review [OAuth implementation](docs/OAUTH-IMPLEMENTATION.md) and [security releas
 ## Safe production sequence
 
 1. Review branch and dependency supply chain; lock versions and execute the full test suite and Worker typecheck. Staged nonce guard has 5 passing unit tests and a 20-request SQLite concurrency check (1 claim succeeded, 19 rejected).
-2. Validate the staged `OAuthReplayGuard` Durable Object migration and `OAUTH_REPLAY_GUARD` binding under a real Workers runtime. Both consent POST and callback now require atomic state consumption; the live Worker has none of the OAuth KV or Durable Object bindings yet.
-3. Check SaaS OIDC discovery (issuer, endpoints, audience), and verify real Worker/Access route interception without removing protection.
-4. Validate unauthorized `/mcp` rejection, then OAuth discovery, registration, PKCE, callback, token issuance, expiration, and `tools/list` using an authorized client.
-5. Verify read-only pipeline/workflow/job tools on NEN's known successful pipeline and reject cross-project IDs.
-6. Only after separate approval and a verified auth path, design an explicit, allowlisted, rate-limited, auditable `circleci_trigger`. No chargeable CI trigger without authorization.
+2. Verify the new `__Host-OAUTH_STATE` browser-bound callback cookie, signed nonce replay protection, and upstream OAuth POST `redirect: error` in a real browser/workerd environment. These source changes and new handler tests are staged only.
+3. Validate the staged `OAuthReplayGuard` Durable Object migration and `OAUTH_REPLAY_GUARD` binding under a real Workers runtime. Both consent POST and callback now require atomic state consumption; the live Worker has none of the OAuth KV or Durable Object bindings yet.
+4. Check SaaS OIDC discovery (issuer, endpoints, audience), and verify real Worker/Access route interception without removing protection.
+5. Validate unauthorized `/mcp` rejection, then OAuth discovery, registration, PKCE, callback, token issuance, expiration, and `tools/list` using an authorized client.
+6. Verify read-only pipeline/workflow/job tools on NEN's known successful pipeline and reject cross-project IDs.
+7. Only after separate approval and a verified auth path, design an explicit, allowlisted, rate-limited, auditable `circleci_trigger`. No chargeable CI trigger without authorization.
 
 **Do not deploy this branch yet.** No GitHub Actions or per-commit CircleCI triggers are required.
 
