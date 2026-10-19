@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { validateOidcClaims } from "./oidc-claims";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import {
 	addApprovedClient,
@@ -149,8 +150,13 @@ export async function handleAccessRequest(
 			return errResponse;
 		}
 
-		const idTokenClaims = await verifyToken(env, idToken);
-		if (typeof idTokenClaims.email !== "string" || idTokenClaims.email.toLowerCase() !== "devops@amaraii.com") return new Response("Forbidden", {status:403});
+		let idTokenClaims: Record<string, any>;
+		try {
+			idTokenClaims = await verifyToken(env, idToken);
+			validateOidcClaims(idTokenClaims, env.ACCESS_TEAM_DOMAIN, env.ACCESS_CLIENT_ID, "devops@amaraii.com");
+		} catch {
+			return new Response("Forbidden", { status: 403 });
+		}
 		const user = {
 			email: idTokenClaims.email,
 			name: idTokenClaims.name,
@@ -214,7 +220,8 @@ async function fetchAccessPublicKey(env: Env, kid: string) {
 	const keys = (await resp.json()) as {
 		keys: (JsonWebKey & { kid: string })[];
 	};
-	const jwk = keys.keys.filter((key) => key.kid === kid)[0];
+	const jwk = keys.keys.find((key) => key.kid === kid && key.kty === "RSA");
+	if (!jwk) throw new Error("Unknown signing key");
 	const key = await crypto.subtle.importKey(
 		"jwk",
 		jwk,
@@ -251,6 +258,9 @@ function parseJWT(token: string) {
  */
 async function verifyToken(env: Env, token: string) {
 	const jwt = parseJWT(token);
+	if (jwt.header.alg !== "RS256" || typeof jwt.header.kid !== "string") {
+		throw new Error("Unsupported JWT algorithm");
+	}
 	const key = await fetchAccessPublicKey(env, jwt.header.kid);
 
 	const verified = await crypto.subtle.verify(
