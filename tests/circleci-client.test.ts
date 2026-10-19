@@ -133,3 +133,12 @@ test("classifies network failures without returning exception details or credent
   await assert.rejects(api.getPipeline(pipelineId),e=>e instanceof Error && e.message.includes(expected) && !e.message.includes("private-token"));
  }
 });
+
+
+test("calls the runtime fetch primitive with its global receiver", async () => {
+ const api=client(async function(this: unknown) {
+  assert.equal(this, globalThis);
+  return Response.json({id:pipelineId,project_slug:projectSlug});
+ });
+ assert.equal((await api.getPipeline(pipelineId)).id,pipelineId);
+});

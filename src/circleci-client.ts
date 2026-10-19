@@ -91,7 +91,7 @@ export class CircleCIClient {
 		if (!env.CIRCLE_TOKEN) throw new CircleCIError("CircleCI credentials are not configured");
 		if (!/^[\x21-\x7e]+$/.test(env.CIRCLE_TOKEN)) throw new CircleCIError("Configured CircleCI credential contains invalid whitespace or control characters");
 		this.projectPath = encodeProjectSlug(env.CIRCLE_PROJECT_SLUG);
-		this.fetcher = fetcher;
+		this.fetcher = fetcher.bind(globalThis);
 	}
 
 	private async getJson(url: string): Promise<unknown> {
