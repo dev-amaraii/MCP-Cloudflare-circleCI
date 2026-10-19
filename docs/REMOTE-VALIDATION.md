@@ -11,10 +11,10 @@ change Cloudflare Access settings, or trigger CircleCI automatically.
   `bootstrap_lockfile` and `run_validation`.
 - Both workflow jobs use the Node 24.13 CircleCI image, with no CircleCI
   contexts, Cloudflare credentials, GitHub write token, or CircleCI token.
-- **Lockfile now committed and source-verified:** `package-lock.json` was supplied after remote CircleCI bootstrap, validated against the current manifest, and committed at `052a61c9`. It has npm lockfile v3 format, 292 package records (including the root), and all 291 resolved packages have SHA-512 integrity metadata from `registry.npmjs.org`. The chat container still cannot install npm dependencies.
+- **Lockfile regeneration REQUIRED:** The reviewed v3 lockfile from commit `052a61c9` still records MCP SDK `1.32.1` at the root and `1.29.0` nested under `agents`. Pipeline #33 reached `npm run check` and failed with three TypeScript errors, including incompatible MCP SDK private-type declarations. The branch now pins SDK `1.29.0` but its committed lockfile is **stale**. Do not run `run_validation=true` until a new reviewed lockfile artifact has been committed.
 - Config YAML was parsed locally and manual-guard defaults were inspected.
   This is **not** a CircleCI config compile, pipeline execution or full test pass.
-- The user initiated CircleCI bootstrap jobs; an earlier job failed npm resolution (ERESOLVE), and the dependency manifest was corrected before the supplied lockfile was produced. **The complete validation job has not yet run.**
+- The user completed the first bootstrap and manually ran CircleCI **validation #33**, which failed at `npm run check`: missing `node:buffer` typings, WebCrypto `BufferSource` type mismatch, and two separately installed MCP SDK versions. Source fixes and a manual lockfile-refresh job are staged; these fixes remain unverified by full CircleCI.
 
 ## 1. One-time CircleCI project setup (requires CircleCI web UI)
 
@@ -43,7 +43,7 @@ Official references:
 - https://circleci.com/docs/guides/orchestrate/set-up-triggers/
 - https://circleci.com/docs/guides/orchestrate/triggers-overview/
 
-## 2. Generate the npm lockfile on demand (completed for current manifest)
+## 2. Generate or refresh the npm lockfile (NEXT — required after SDK pin)
 
 **Requires a separately approved CircleCI execution.** In the CircleCI web
 app select the MCP project → **Trigger Pipeline** and use:
@@ -58,9 +58,9 @@ The `export_lockfile` job executes only
 in an ephemeral CircleCI container and exports **package-lock.json**
 as a CircleCI artifact. No dependency scripts and no deploy are run.
 
-**Completed:** The user supplied the generated JSON as a Markdown-fenced attachment; the exact JSON was validated, unwrapped, given a canonical final newline and committed as `package-lock.json`. GitHub blob SHA `c0936d721bc011a0f18923a50af07c1b7fb69596` matches the independently computed local Git blob. Use bootstrap again only for an intentionally revised dependency set.
+**Refresh required:** The old artifact was reviewed and committed, but `package.json` has since pinned `@modelcontextprotocol/sdk` to `1.29.0`. A new manual `bootstrap_lockfile=true` run regenerates the lockfile from scratch in an ephemeral CircleCI container and **rejects duplicate MCP SDK installs**. Upload its updated artifact so it can be reviewed and committed. Do not hand-edit dependency resolution or bypass peer checks.
 
-## 3. Run full validation — NEXT, after committed lockfile
+## 3. Run full validation — AFTER refreshed lockfile is reviewed and committed
 
 Again, **requires a separately approved CircleCI execution**.
 Trigger Pipeline with the same two branches and:
