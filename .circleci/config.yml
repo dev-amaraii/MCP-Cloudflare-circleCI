@@ -25,8 +25,12 @@ jobs:
               exit 1
             }
       - run:
-          name: Refresh lockfile for the current dependency manifest without running scripts
-          command: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          name: Re-resolve a clean lockfile for the aligned SDK version without running scripts
+          command: |
+            # Do not retain an obsolete nested SDK from the prior 1.32.1 lock.
+            # This removes the lock ONLY inside this ephemeral, manual CI job.
+            rm -f package-lock.json
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
       - run:
           name: Verify npm created a valid lockfile
           command: |
