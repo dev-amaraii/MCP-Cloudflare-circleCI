@@ -1,55 +1,39 @@
-# OAuth implementation and verification
+# Access Managed OAuth implementation
 
-## Architecture
+## Active architecture
 
-The MCP server uses the Cloudflare Workers OAuth Provider for MCP authorization code flow, PKCE, dynamic client registration, consent, and token issuance. Cloudflare Access for SaaS is the upstream OIDC identity provider. The self-hosted Access application remains an outer access layer and retains its allow policy for `devops@amaraii.com`.
+MCP client → Cloudflare Access Managed OAuth → stateless Worker → read-only CircleCI API.
 
-The callback accepts the ID token only after:
+The self-hosted Access app **NEN CircleCI MCP** retains its sole allow policy for `devops@amaraii.com` and its Worker destination. Managed OAuth supplies public metadata and client registration while protecting `/mcp`. The Worker does not run a second OAuth authorization server behind Access.
 
-1. Fetching the Access application's OIDC discovery document at `https://<team>.cloudflareaccess.com/cdn-cgi/access/sso/oidc/<client-id>/.well-known/openid-configuration`.
-2. Confirming that discovery's issuer, authorization endpoint, token endpoint, and JWKS URI match the configured SaaS application and Worker variables.
-3. Requiring the `RS256` algorithm and a matching RSA signing key from the configured JWKS endpoint.
-4. Verifying the JWT signature and checking exact issuer, SaaS client ID audience, expiration, not-before, non-empty subject, and `devops@amaraii.com` email.
-5. Consuming the saved, HMAC-protected OAuth state once and using the PKCE verifier for the upstream code exchange.
+On every MCP request, `src/access-jwt.ts` verifies the Access assertion's RS256 signature using the team's `/cdn-cgi/access/certs`, exact team issuer, self-hosted application audience, expiry, not-before, non-empty subject and exact allowlisted email. Missing/forged assertion headers are rejected. A bare email header or caller-supplied bearer string cannot establish identity. Service tokens cannot impersonate the human identity because email and subject are required.
 
-`ACCESS_AUD` is the self-hosted Access application's audience tag. It is not the expected OIDC audience for the SaaS application; the ID token audience is `ACCESS_CLIENT_ID`. The signed ID token's email is checked only after cryptographic verification.
+A new SDK server and Web Standard Streamable HTTP transport are created per request. No persisted MCP session or Worker OAuth token database is needed. The existing SaaS OIDC handlers/tests are historical and inactive; neither `/authorize` nor `/callback` is routed by the Worker. Preserve the SaaS app and OAuth KV namespace for rollback rather than deleting them.
 
-The callback URI is built from `MCP_PUBLIC_URL`, not the request Host header. Keep it equal to the hostname registered in the SaaS app's redirect URI. Local HTTP is accepted only for `localhost` development.
+## Approved Access configuration
 
-The upstream Access bearer token is checked as part of the token response but is not retained in MCP authorization props because CircleCI calls use the separate `CIRCLE_TOKEN` binding.
+The owner explicitly approved these settings on 2026-10-19:
 
-## Current implementation versus verification
+- Managed OAuth enabled.
+- Dynamic registration enabled for localhost/127.0.0.1 clients (Codex).
+- Allowed hosted callback URIs: `https://chatgpt.com/connector_platform_oauth_redirect` and `https://chatgpt.com/connector/oauth/*`.
+- Access token lifetime: 15 minutes; OAuth session duration: 24 hours.
+- Existing `devops@amaraii.com` allow policy and protected Worker destination unchanged.
 
-- **Implemented in the local working copy:** discovery and endpoint matching, RS256/JWKS token verification, claim validation, allowlisted identity check, fixed callback base URL, PKCE/state path, and read-only MCP tools.
-- **Unit tested:** signed and invalid ID tokens, claim mismatches, CircleCI project ownership, job association, and log URL validation.
-- **Verified locally:** type check, Worker dry run, local discovery/registration/anonymous rejection, and in-memory MCP initialization/tool listing/read-only calls against mocked CircleCI.
-- **Verified live:** public SaaS discovery/JWKS return 200, callback registration matches the public URL, both allow policies remain restricted, and anonymous Worker requests redirect to Access login.
-- **Blocked:** the outer Access layer also redirects OAuth discovery, registration and token requests, preventing standard client bootstrap.
-- **Not verified:** signed-in Access login/consent/PKCE callback/token exchange, live MCP transport, CircleCI calls, or ChatGPT connection.
-- **Not deployed:** the production Worker has not been changed.
+Readback confirmed those exact settings. Anonymous OAuth authorization-server and protected-resource metadata return 200 JSON. Anonymous `/mcp` now returns a 401 Bearer challenge pointing at Access metadata instead of an unusable HTML login redirect. Registration is not authorization: users must still satisfy the unchanged Access policy and the origin's signed-email check.
 
-## Cloudflare configuration to verify before deployment
+## Connect clients
 
-1. Confirm `NEN CircleCI MCP OAuth` is the OIDC SaaS app and its exact client ID and OAuth endpoints match Worker bindings.
-2. Confirm its registered callback is `https://nen-circleci-mcp.devops-948.workers.dev/callback` (or the value selected in `MCP_PUBLIC_URL`).
-3. Confirm the SaaS app's Access policy allows only `devops@amaraii.com` and its intended identity provider is enabled.
-4. Confirm the self-hosted Access app still has the same allowlist. Do not remove or broaden that policy.
-5. Test whether the self-hosted application intercepts OAuth discovery, `/register`, `/authorize`, `/callback`, `/token`, and `/mcp`. The OAuth browser callback and MCP client discovery must complete without weakening the Access boundary.
-6. Verify the `OAUTH_KV` binding and `MCP_OBJECT` Durable Object binding/migration on the selected Worker environment.
+Codex: register a Streamable HTTP MCP server named `nen-circleci` using `https://nen-circleci-mcp.devops-948.workers.dev/mcp`, then complete its OAuth sign-in as the allowlisted owner. The CLI supports `codex mcp add nen-circleci --url URL` and `codex mcp login nen-circleci`; inspect current help before using additional flags. Existing config must be preserved.
 
-The current source uses the existing single-Worker `OAuthProvider` integration. Cloudflare's October 2026 Workers OAuth Provider 1.0 split API is a separate major-version migration and has not been performed in this change. Before upgrading, compare its migration guidance with the existing Cloudflare Access example and test it independently.
+ChatGPT: create a private MCP connection using the same endpoint and OAuth, then complete the owner login. Use the exact callback URI displayed in its management UI. Do not claim the ChatGPT connection works until that connection initializes and lists the tools.
 
-## Troubleshooting
+Never request or record the owner's password, email verification code, browser cookies or bearer tokens in handoff notes. The owner completes any required interactive sign-in.
 
-- **Discovery mismatch:** compare the OIDC discovery document's issuer and endpoint URLs to the values from the SaaS app. Do not substitute `ACCESS_AUD` for `ACCESS_CLIENT_ID`.
-- **401 from callback:** verify OAuth state, PKCE exchange, discovery/JWKS reachability, key rotation, and ID token claims. The callback intentionally returns a generic authentication failure and does not expose token details.
-- **Access login loops or callback blocked:** check both Access applications' host/path coverage and policies. Do not bypass Access to make the loop disappear.
-- **MCP tools missing:** only the allowlisted subject can receive the CircleCI tools. Check the signed ID token identity and tool initialization, not the CircleCI token.
+## Manual deployment and rollback
 
-## Credential handling and rotation
+Use the account pinned in `wrangler.toml`, retain encrypted `CIRCLE_TOKEN` and dashboard project configuration, and deploy manually with `npm run deploy`. Preview URLs are disabled. Anonymous/invalid identity checks and signed-in protocol tests are required after deployment; code/build success is not live proof.
 
-Store all credentials as encrypted Worker secrets. Never print, commit, or log OAuth tokens, `CIRCLE_TOKEN`, authorization headers, or `COOKIE_ENCRYPTION_KEY`. Rotate credentials in the Cloudflare dashboard and update the corresponding Worker secret; do not regenerate unrelated credentials. Test OAuth and CircleCI access in a non-production environment after each rotation.
+The pre-change deployed Worker version is `957d1b68-32ee-4757-ba9b-daaf78a94229`. Before rollback, inspect the latest deployment history to confirm the target. Restore that version if the new origin fails, and disable Managed OAuth on the existing app only as part of a reviewed rollback while preserving its policies and destination. Never add a bypass policy or broaden allowed identities.
 
-## Verification record
-
-See [deployment verification](DEPLOYMENT-VERIFICATION.md) for the 2026-10-19 API inspection, local and live response matrix, dependency compatibility choices, and deployment blockers. Worker encrypted endpoint bindings were not decrypted or compared; their presence alone is not proof of correct values. Current production settings lack OAuth KV and MCP Durable Object bindings. The manual deploy script preserves existing dashboard-managed variables using `--keep-vars`.
+Sources: [Access Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/), [Access JWT verification](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/), [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [ChatGPT OAuth](https://developers.openai.com/plugins/build/auth).

@@ -14,18 +14,13 @@
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.8.1",
     "@modelcontextprotocol/sdk": "1.32.1",
-    "agents": "0.17.4",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "jose": "^6.2.12"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261019.1",
     "@types/node": "^26.0.1",
     "typescript": "^5.9.0",
     "wrangler": "^4.105.0"
-  },
-  "overrides": {
-    "agents": {
-      "@modelcontextprotocol/sdk": "$@modelcontextprotocol/sdk"
-    }
   }
 }

@@ -1,20 +1,14 @@
 name = "nen-circleci-mcp"
+account_id = "9483d072db9941b23fe0bcd92d76d0d6"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
+preview_urls = false
 
+# Access Managed OAuth owns registration, consent, PKCE and token storage.
+# The read-only origin is stateless and needs no KV or Durable Object bindings.
 [vars]
 MCP_PUBLIC_URL = "https://nen-circleci-mcp.devops-948.workers.dev"
-
-[[kv_namespaces]]
-binding = "OAUTH_KV"
-id = "b27a78e5d8a8447ea233f0e7c92459d4"
-
-[[durable_objects.bindings]]
-name = "MCP_OBJECT"
-class_name = "CircleMCP"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["CircleMCP"]
+ACCESS_TEAM_DOMAIN = "https://patient-unit-31a3.cloudflareaccess.com"
+ACCESS_AUD = "050c25e19e098dccc0b075c3cf298c8f4ea64f183b1bb18125a4373701c3be3f"

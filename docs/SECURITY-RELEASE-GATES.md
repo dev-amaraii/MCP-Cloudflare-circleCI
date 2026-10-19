@@ -1,48 +1,45 @@
 # Security release gates
 
-This file separates local implementation and test evidence from live service verification. The production Worker remains unchanged.
+Current architecture: Access Managed OAuth with a signed-assertion, stateless Streamable HTTP Worker. The previous SaaS OIDC/Worker-OAuth design is retained only as historical source/tests. See [current evidence](MANAGED-OAUTH-VERIFICATION.md); [earlier evidence](DEPLOYMENT-VERIFICATION.md) records the superseded routing blocker.
 
-## Current verification
+## Build and security checks
 
-See [deployment verification — 2026-10-19](DEPLOYMENT-VERIFICATION.md) for reproducible evidence. Both Access allow policies still restrict identity to `devops@amaraii.com`. Public SaaS discovery/JWKS work, but the outer Access layer redirects OAuth metadata, registration, token, callback and MCP requests to login. This blocks standard MCP bootstrap. Live settings lack OAuth KV/DO bindings and `MCP_PUBLIC_URL`; the KV namespace exists, while the DO namespace/migration is not yet applied. No remote configuration or deployment was changed.
+- [x] Locked dependencies install without force flags; npm reports zero advisories.
+- [x] Type check passes.
+- [x] 35 tests pass, including real HTTP MCP initialization/list/call through signed assertion verification.
+- [x] Missing/forged/expired/wrong-issuer/wrong-audience/wrong-email assertions fail before CircleCI access.
+- [x] Pipeline → workflow → job ownership checks and bounded log fetches remain in place.
+- [x] Only six read-only tools are registered. Unknown mutation names make no API calls.
+- [x] Worker dry run passes; the active entry point requires no KV/DO provisioning or migration.
+- [x] Cloudflare account, team issuer, audience and public URL are explicit in configuration.
+- [x] Production encrypted credentials remain in Cloudflare; no tokens or owner verification codes enter handoff notes.
+- [x] CircleCI configuration validates with official CLI 1.7.0; JUnit command passes locally.
+- [x] No GitHub Actions or automated production deployment workflow is added.
 
-## Implemented and locally tested
+## Access routing
 
-- [x] The callback verifies OIDC discovery and configured endpoints before trusting the SaaS OIDC ID token.
-- [x] The callback requires RS256 and validates signature, issuer, audience, expiry, not-before, subject, and allowlisted email.
-- [x] The callback uses a configured public URL rather than the incoming Host header.
-- [x] Pipeline, workflow, and job requests are scoped to `CIRCLE_PROJECT_SLUG` by validating parent ownership.
-- [x] Log output URLs are restricted to HTTPS CircleCI artifact hosts, fetched without redirects, and size bounded.
-- [x] The MCP server registers read-only pipeline, workflow, job-detail, and log tools only.
-- [x] Unit tests use generated signing keys and mocked API responses; they do not call live services or trigger pipelines.
+- [x] Owner explicitly approved exact Managed OAuth and callback registration settings.
+- [x] Applied/read back settings: localhost/loopback clients, the two approved ChatGPT callback patterns, 15-minute tokens, 24-hour sessions.
+- [x] Existing sole `devops@amaraii.com` allow policy and Worker destination verified unchanged.
+- [x] Live OAuth discovery returns 200 JSON and anonymous `/mcp` returns 401 with OAuth metadata challenge.
+- [x] Live registration accepts localhost and approved ChatGPT callback, rejects an unapproved external callback.
+- [ ] Verify a real owner OAuth login and wrong-identity denial end to end.
 
-## Still required before deployment
+## Manual deployment and acceptance
 
-- [x] Install dependencies and generate the lockfile.
-- [x] Run `npm run check`, `npm test`, and `npx wrangler deploy --dry-run` from the checked-out project.
-- [x] Review lockfile/package compatibility and confirm the Cloudflare OAuth Provider version/migration path (0.8.3 retained; 1.0 migration deferred).
-- [x] Verify live Access OIDC discovery metadata and JWKS for the SaaS application. Encrypted endpoint binding values still require an owner-side match.
-- [ ] Verify the Access SaaS and self-hosted policies and their actual enforcement.
-- [ ] Confirm the self-hosted application does not prevent OAuth discovery, client registration, authorization, token exchange, callback, or MCP requests.
-- [ ] Confirm `OAUTH_KV`, the Durable Object binding and migration, Worker URL, callback URL, and encrypted secret bindings for the intended account and Worker.
-- [ ] Test anonymous requests, wrong identity, invalid/expired token, MCP initialization, tool listing, and read-only CircleCI calls in a safe environment.
-- [ ] Review the legacy CircleCI v1.1 log-output behavior and artifact host formats against the actual project.
-- [ ] Deploy only after every preceding gate passes. The current Access routing blocker must be resolved and verified first.
+A protected manual deployment is authorized to complete live verification; it is not an assertion that client acceptance has passed. Preserve Access policy enforcement, encrypted CircleCI credentials and dashboard project variables. The old Worker bootstrap has no usable MCP implementation, so signed-in origin tests require deploying the tested origin. Keep the PR draft until those tests pass.
 
-## Explicitly out of scope for this release
+- [ ] Refresh expired local Cloudflare CLI login and verify the intended account.
+- [ ] Deploy the tested commit manually with `npm run deploy` and record the version.
+- [ ] Verify anonymous/invalid bearer denial on the deployed endpoint.
+- [ ] Complete Codex OAuth, initialize the deployed MCP and list/call tools.
+- [ ] Complete a real private ChatGPT MCP connection; initialization/tool listing must be observed.
+- [ ] Confirm the configured CircleCI project maps to `dev-amaraii/MCP-Cloudflare-circleCI` and the existing token can read it.
+- [ ] Observe a successful hosted CircleCI verification run for the deployed PR commit.
+- [ ] Resolve and verify bounded log retrieval for the actual project type. The current legacy implementation rejects `circleci/...` log requests.
 
-- [x] Pipeline triggering, cancellation, approval, and rerun tools are absent.
-- [ ] Do not implement or enable triggering until authenticated read-only calls pass end-to-end review and the user separately authorizes the trigger milestone.
-- [ ] Do not claim ChatGPT connectivity until a real ChatGPT MCP connection has been completed.
+## Ship-gate assessment
 
-## Evidence recorded for this continuation
+Stack: TypeScript, Cloudflare Worker, MCP SDK, jose, managed Access auth. No application database, frontend, LLM calls, file uploads or payment flows; those checks do not apply. Authentication, input validation, project isolation, timeout/pagination/log bounds, generic error responses, lockfile, strict TypeScript, ignored secrets and dependency advisories were reviewed/tested. No exposed source credentials or registered write tool were found.
 
-- `npm run check`: passed.
-- `npm test`: 23 passed, 0 failed; CircleCI calls use mocks.
-- Wrangler dry run: passed; no upload or deployment.
-- Dependency audit after SDK deduplication: zero reported vulnerabilities.
-- Local Worker simulator: discovery 200, client registration 201, unauthenticated MCP 401, missing-state callback 400.
-- Live public SaaS discovery and JWKS: 200; no signed-in OAuth exchange completed.
-- Live anonymous OAuth/MCP requests: 302 to Access login, including metadata endpoints (blocking).
-- Production deploy and live CircleCI calls: not performed.
-- NEN Context OS: read and searched; no matching CircleCI project note found and no update made.
+Live deployment/client/CircleCI acceptance remains pending. Cloudflare Access owns authentication rate controls; separate origin-level request throttling and detailed operational telemetry have not been added. Rollback target and procedure are recorded in [OAuth implementation](OAUTH-IMPLEMENTATION.md). Do not mark production-ready based only on local tests or the public metadata response.

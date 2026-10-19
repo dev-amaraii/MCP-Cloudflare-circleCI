@@ -1,18 +1,6 @@
 # NEN CircleCI MCP
 
-Read-only remote MCP server for CircleCI, running on Cloudflare Workers. It uses Cloudflare Access for SaaS as the OIDC identity provider and the Cloudflare Workers OAuth Provider for MCP client authorization.
-
-## Current implementation status
-
-The local implementation exposes six read-only tools. It does not register pipeline trigger, cancellation, approval, or rerun tools. The production Worker has not been updated by this work.
-
-| Area | Local code status | Verification status |
-| --- | --- | --- |
-| OAuth authorization code flow, PKCE, client registration, and consent | Uses Cloudflare's OAuth Provider and existing helper flow | Not verified end to end |
-| Access ID token verification | Discovery, configured endpoint matching, RS256 signature, issuer, audience, time, subject, and allowlisted email | Unit tested with generated keys; not tested against the live Access SaaS app |
-| CircleCI project isolation | Pipeline → workflow → job ownership checks | Unit tested with API mocks; not tested against the live CircleCI project |
-| Read-only MCP tools | Pipeline/workflow/job details and job logs | Type check and dry run pass; in-memory MCP initialization/listing/calls pass; live transport unverified |
-| Production deploy and ChatGPT connection | Not performed | Not verified |
+A read-only CircleCI MCP server on Cloudflare Workers, protected by Cloudflare Access Managed OAuth. Codex and ChatGPT authenticate through Access; the Worker verifies the signed `Cf-Access-Jwt-Assertion` on every request and accepts only `devops@amaraii.com`.
 
 ## Tools
 
@@ -23,31 +11,21 @@ The local implementation exposes six read-only tools. It does not register pipel
 - `circleci_job_details`
 - `circleci_job_logs`
 
-Every pipeline lookup is checked against `CIRCLE_PROJECT_SLUG`. Workflow IDs are resolved back to their pipeline before use, and jobs are resolved from a project-owned workflow before the job-number endpoint is called. List tools return one API page at a time. Job logs use CircleCI's v1.1 job-output endpoint where available; output URLs must use HTTPS and an approved CircleCI artifact host, redirects are rejected, and output is bounded to 120 KB total.
+Pipeline, workflow and job calls verify ownership against `CIRCLE_PROJECT_SLUG`. Pagination and log output are bounded. No trigger, rerun, approve or cancellation tool is registered. Legacy v1.1 logs support `gh` and `bb` project slugs; the currently configured `circleci/...` project cannot use this log path. Live CircleCI project mapping and log support must be verified before claiming full operation.
 
-## Configuration
+## Authentication and deployment
 
-`MCP_PUBLIC_URL` is a non-secret Worker variable in `wrangler.toml`. It pins the callback URI to the registered hostname and prevents callback URL construction from trusting the incoming Host header. Update it before using a different hostname.
+Access Managed OAuth owns discovery, client registration, consent, PKCE and token storage. Its existing allow policy and Worker destination remain in place. The Worker uses the self-hosted app's `ACCESS_AUD`, the team issuer and `/cdn-cgi/access/certs` signing keys. The older SaaS OIDC implementation remains as historical source/tests, but is not routed by the active entry point.
 
-Keep credentials in Cloudflare Worker encrypted secrets. Required bindings:
+The active server uses stateless Streamable HTTP: one authenticated server/transport per request, no shared session, KV binding, Durable Object or migration. The pre-existing OAuth KV namespace and SaaS app are retained; no resource deletion is required.
 
-- `CIRCLE_TOKEN`
-- `CIRCLE_PROJECT_SLUG`
-- `ACCESS_TEAM_DOMAIN`
-- `ACCESS_CLIENT_ID`
-- `ACCESS_CLIENT_SECRET`
-- `ACCESS_TOKEN_URL`
-- `ACCESS_AUTHORIZATION_URL`
-- `ACCESS_JWKS_URL`
-- `COOKIE_ENCRYPTION_KEY`
+Required runtime settings:
 
-`CIRCLE_DEFINITION_ID` and `ACCESS_AUD` are retained in the binding type for compatibility with existing configuration. The OIDC ID token audience check uses the **SaaS application's `ACCESS_CLIENT_ID`**, not the self-hosted Access application's audience tag. No secret values belong in source, logs, or documentation.
+- `CIRCLE_TOKEN`: encrypted Worker secret; never commit or log it.
+- `CIRCLE_PROJECT_SLUG`: configured CircleCI project, retained as a dashboard variable.
+- `MCP_PUBLIC_URL`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`: non-secret values pinned in `wrangler.toml`.
 
-The existing OAuth KV binding is `OAUTH_KV`. The MCP Durable Object binding and SQLite class migration remain configured in `wrangler.toml`.
-
-## Development and checks
-
-Use Node.js 22.6 or newer and npm:
+Use Node.js 24 and the committed npm lockfile:
 
 ```sh
 npm ci
@@ -56,10 +34,6 @@ npm test
 npx wrangler deploy --dry-run
 ```
 
-The committed lockfile aligns Workers types with Wrangler and deduplicates Agents onto the patched MCP SDK; see [verification evidence](docs/DEPLOYMENT-VERIFICATION.md). The tests use mocked CircleCI and OIDC endpoints. They do not call CircleCI, Cloudflare, or trigger pipelines. `npm run deploy` uses `wrangler deploy --keep-vars` to preserve dashboard-managed non-secret configuration and publishes to production and must only be used after the release gates in `docs/SECURITY-RELEASE-GATES.md` are cleared.
+`.circleci/config.yml` runs install, type check, tests with JUnit results, and a Worker dry run on one small Docker executor. It does not deploy or need production secrets. No GitHub Actions are added. This workflow becomes live only when the CircleCI project is connected to this repository and its trigger is enabled.
 
-## Cloudflare Access and OAuth routing
-
-The Worker expects the separate `NEN CircleCI MCP OAuth` Access for SaaS OIDC application for the authorization code flow. The self-hosted Access application protects the Worker hostname. Before deployment, verify how that application handles `/authorize`, `/register`, `/callback`, OAuth discovery, and `/mcp`. Do not weaken or bypass its allowlist to make an OAuth test pass. See `docs/OAUTH-IMPLEMENTATION.md` for the required checks.
-
-Live verification on 2026-10-19 found that the outer Access layer redirects OAuth discovery and registration/token requests to its login page. Production deployment remains blocked; keep PR #1 in draft. Public SaaS discovery/JWKS and anonymous denial were verified. See [deployment verification](docs/DEPLOYMENT-VERIFICATION.md) for exact evidence and remaining gates.
+`npm run deploy` is the manual Cloudflare deployment command and preserves dashboard variables with `--keep-vars`. Review [release gates](docs/SECURITY-RELEASE-GATES.md) before running it. See [OAuth architecture and setup](docs/OAUTH-IMPLEMENTATION.md) and [current verification](docs/MANAGED-OAUTH-VERIFICATION.md).

@@ -1,5 +1,7 @@
 # Deployment verification — 2026-10-19
 
+Historical snapshot before the approved Managed OAuth continuation. See [current verification](MANAGED-OAUTH-VERIFICATION.md) and [current release gates](SECURITY-RELEASE-GATES.md); the earlier routing result below has been superseded.
+
 ## Scope and source
 
 Continued draft PR #1 from head `35b495168297906d9fd65ad02b962f1a13b46179` on `codex/circleci-read-only-oauth-hardening`, using a clean checkout. The older working copy was compared byte-for-byte with the PR's 14 changed files and left intact. No GitHub Actions, production deployment, Access policy change, or pipeline mutation was performed.
