@@ -77,11 +77,11 @@ test("first-time consent stays CSRF-protected and redirects with browser-bound s
   const csrfClearCookies = approved.headers.getSetCookie()
     .filter((value) => value.startsWith("__Host-CSRF_TOKEN="));
   assert.equal(csrfClearCookies.length, 1);
-  assert.match(csrfClearCookies[0], /^__Host-CSRF_TOKEN=;/);
-  assert.match(csrfClearCookies[0], /(?:^|;\\s*)Max-Age=0(?:;|$)/i);
-  assert.match(csrfClearCookies[0], /(?:^|;\\s*)Secure(?:;|$)/i);
-  assert.match(csrfClearCookies[0], /(?:^|;\\s*)HttpOnly(?:;|$)/i);
-  assert.match(csrfClearCookies[0], /(?:^|;\\s*)Path=\\/(?:;|$)/i);
+  const csrfCookieParts = csrfClearCookies[0].split(";").map((part) => part.trim());
+  assert.equal(csrfCookieParts[0], "__Host-CSRF_TOKEN=");
+  for (const requiredAttribute of ["Max-Age=0", "Secure", "HttpOnly", "Path=/"]) {
+    assert.ok(csrfCookieParts.includes(requiredAttribute), "Missing CSRF clear-cookie attribute: " + requiredAttribute);
+  }
 
   const callback = new URL(approved.headers.get("location")).searchParams.get("state");
   const stateCookie = getCookie(approved, "__Host-OAUTH_STATE=");
