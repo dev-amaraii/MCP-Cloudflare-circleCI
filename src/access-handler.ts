@@ -42,6 +42,10 @@ export async function handleAccessRequest(
 
 		// Generate CSRF protection for the approval form
 		const { token: csrfToken, setCookie } = generateCSRFProtection();
+		// Bind the consent form to the parsed request using an opaque, HMAC-signed KV state.
+		const { stateToken: approvalStateToken } = await createOAuthState(
+			oauthReqInfo, env.OAUTH_KV, env.COOKIE_ENCRYPTION_KEY,
+		);
 
 		return renderApprovalDialog(request, {
 			client: await env.OAUTH_PROVIDER.lookupClient(clientId),
@@ -52,7 +56,7 @@ export async function handleAccessRequest(
 				name: "Cloudflare Access MCP Server",
 			},
 			setCookie,
-			state: { oauthReqInfo },
+			state: { approvalStateToken },
 		});
 	}
 
@@ -70,27 +74,35 @@ export async function handleAccessRequest(
 				return new Response("Missing state in form data", { status: 400 });
 			}
 
-			let state: { oauthReqInfo?: AuthRequest };
+			let state: { approvalStateToken?: unknown };
 			try {
 				state = JSON.parse(atob(encodedState));
-			} catch (_e) {
+			} catch {
 				return new Response("Invalid state data", { status: 400 });
 			}
-
-			if (!state.oauthReqInfo || !state.oauthReqInfo.clientId) {
+			if (typeof state?.approvalStateToken !== "string") {
+				return new Response("Invalid request", { status: 400 });
+			}
+			// Consume the original signed state exactly once; never trust client-supplied AuthRequest.
+			const stateUrl = new URL("/callback", request.url);
+			stateUrl.searchParams.set("state", state.approvalStateToken);
+			const { oauthReqInfo } = await validateOAuthState(
+				new Request(stateUrl), env.OAUTH_KV, env.COOKIE_ENCRYPTION_KEY,
+			);
+			if (!oauthReqInfo.clientId) {
 				return new Response("Invalid request", { status: 400 });
 			}
 
 			// Add client to approved list
 			const approvedClientCookie = await addApprovedClient(
 				request,
-				state.oauthReqInfo.clientId,
+				oauthReqInfo.clientId,
 				env.COOKIE_ENCRYPTION_KEY,
 			);
 
 			// Create OAuth state
 			const { stateToken, codeChallenge } = await createOAuthState(
-				state.oauthReqInfo,
+				oauthReqInfo,
 				env.OAUTH_KV,
 				env.COOKIE_ENCRYPTION_KEY,
 			);
