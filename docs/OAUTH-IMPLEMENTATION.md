@@ -22,7 +22,10 @@ The upstream Access bearer token is checked as part of the token response but is
 
 - **Implemented in the local working copy:** discovery and endpoint matching, RS256/JWKS token verification, claim validation, allowlisted identity check, fixed callback base URL, PKCE/state path, and read-only MCP tools.
 - **Unit tested:** signed and invalid ID tokens, claim mismatches, CircleCI project ownership, job association, and log URL validation.
-- **Not verified:** live OIDC discovery/JWKS response, full Access login and callback, OAuth metadata through the self-hosted Access layer, token exchange, MCP client initialization, or ChatGPT connection.
+- **Verified locally:** type check, Worker dry run, local discovery/registration/anonymous rejection, and in-memory MCP initialization/tool listing/read-only calls against mocked CircleCI.
+- **Verified live:** public SaaS discovery/JWKS return 200, callback registration matches the public URL, both allow policies remain restricted, and anonymous Worker requests redirect to Access login.
+- **Blocked:** the outer Access layer also redirects OAuth discovery, registration and token requests, preventing standard client bootstrap.
+- **Not verified:** signed-in Access login/consent/PKCE callback/token exchange, live MCP transport, CircleCI calls, or ChatGPT connection.
 - **Not deployed:** the production Worker has not been changed.
 
 ## Cloudflare configuration to verify before deployment
@@ -46,3 +49,7 @@ The current source uses the existing single-Worker `OAuthProvider` integration. 
 ## Credential handling and rotation
 
 Store all credentials as encrypted Worker secrets. Never print, commit, or log OAuth tokens, `CIRCLE_TOKEN`, authorization headers, or `COOKIE_ENCRYPTION_KEY`. Rotate credentials in the Cloudflare dashboard and update the corresponding Worker secret; do not regenerate unrelated credentials. Test OAuth and CircleCI access in a non-production environment after each rotation.
+
+## Verification record
+
+See [deployment verification](DEPLOYMENT-VERIFICATION.md) for the 2026-10-19 API inspection, local and live response matrix, dependency compatibility choices, and deployment blockers. Worker encrypted endpoint bindings were not decrypted or compared; their presence alone is not proof of correct values. Current production settings lack OAuth KV and MCP Durable Object bindings. The manual deploy script preserves existing dashboard-managed variables using `--keep-vars`.

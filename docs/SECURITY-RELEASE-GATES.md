@@ -2,9 +2,9 @@
 
 This file separates local implementation and test evidence from live service verification. The production Worker remains unchanged.
 
-## Previously observed Cloudflare state
+## Current verification
 
-The Cloudflare inspection recorded on 2026-10-19 found the `nen-circleci-mcp` Worker running bootstrap-only code, a self-hosted Access application with an allow policy limited to `devops@amaraii.com`, the OAuth SaaS application with the same intended email restriction, and the existing encrypted `CIRCLE_TOKEN` binding. This turn did not make or verify new Cloudflare changes.
+See [deployment verification — 2026-10-19](DEPLOYMENT-VERIFICATION.md) for reproducible evidence. Both Access allow policies still restrict identity to `devops@amaraii.com`. Public SaaS discovery/JWKS work, but the outer Access layer redirects OAuth metadata, registration, token, callback and MCP requests to login. This blocks standard MCP bootstrap. Live settings lack OAuth KV/DO bindings and `MCP_PUBLIC_URL`; the KV namespace exists, while the DO namespace/migration is not yet applied. No remote configuration or deployment was changed.
 
 ## Implemented and locally tested
 
@@ -18,16 +18,16 @@ The Cloudflare inspection recorded on 2026-10-19 found the `nen-circleci-mcp` Wo
 
 ## Still required before deployment
 
-- [ ] Install dependencies and generate the lockfile.
-- [ ] Run `npm run check`, `npm test`, and `npx wrangler deploy --dry-run` from the checked-out project.
-- [ ] Review lockfile/package compatibility and confirm the Cloudflare OAuth Provider version/migration path.
-- [ ] Verify live Access OIDC discovery metadata and JWKS for the SaaS application.
+- [x] Install dependencies and generate the lockfile.
+- [x] Run `npm run check`, `npm test`, and `npx wrangler deploy --dry-run` from the checked-out project.
+- [x] Review lockfile/package compatibility and confirm the Cloudflare OAuth Provider version/migration path (0.8.3 retained; 1.0 migration deferred).
+- [x] Verify live Access OIDC discovery metadata and JWKS for the SaaS application. Encrypted endpoint binding values still require an owner-side match.
 - [ ] Verify the Access SaaS and self-hosted policies and their actual enforcement.
 - [ ] Confirm the self-hosted application does not prevent OAuth discovery, client registration, authorization, token exchange, callback, or MCP requests.
 - [ ] Confirm `OAUTH_KV`, the Durable Object binding and migration, Worker URL, callback URL, and encrypted secret bindings for the intended account and Worker.
 - [ ] Test anonymous requests, wrong identity, invalid/expired token, MCP initialization, tool listing, and read-only CircleCI calls in a safe environment.
 - [ ] Review the legacy CircleCI v1.1 log-output behavior and artifact host formats against the actual project.
-- [ ] Deploy only after every preceding gate passes. Do not deploy this isolated working copy from the current session.
+- [ ] Deploy only after every preceding gate passes. The current Access routing blocker must be resolved and verified first.
 
 ## Explicitly out of scope for this release
 
@@ -35,11 +35,14 @@ The Cloudflare inspection recorded on 2026-10-19 found the `nen-circleci-mcp` Wo
 - [ ] Do not implement or enable triggering until authenticated read-only calls pass end-to-end review and the user separately authorizes the trigger milestone.
 - [ ] Do not claim ChatGPT connectivity until a real ChatGPT MCP connection has been completed.
 
-## Evidence recorded for this turn
+## Evidence recorded for this continuation
 
-- `npm test`: 16 tests passed, 0 failed; test calls were mocked/local.
-- `npm install`: blocked by `ENOTFOUND registry.npmjs.org`; no dependency lockfile was generated.
-- `npm run check`: not run because dependencies are unavailable.
-- Wrangler dry run: not run because dependencies are unavailable.
-- Production deploy: not performed.
-- Live OIDC / CircleCI calls: not performed.
+- `npm run check`: passed.
+- `npm test`: 23 passed, 0 failed; CircleCI calls use mocks.
+- Wrangler dry run: passed; no upload or deployment.
+- Dependency audit after SDK deduplication: zero reported vulnerabilities.
+- Local Worker simulator: discovery 200, client registration 201, unauthenticated MCP 401, missing-state callback 400.
+- Live public SaaS discovery and JWKS: 200; no signed-in OAuth exchange completed.
+- Live anonymous OAuth/MCP requests: 302 to Access login, including metadata endpoints (blocking).
+- Production deploy and live CircleCI calls: not performed.
+- NEN Context OS: read and searched; no matching CircleCI project note found and no update made.
