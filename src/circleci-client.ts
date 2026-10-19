@@ -89,6 +89,7 @@ export class CircleCIClient {
 	constructor(env: CircleCIEnv, fetcher: typeof fetch = fetch) {
 		this.env = env;
 		if (!env.CIRCLE_TOKEN) throw new CircleCIError("CircleCI credentials are not configured");
+		if (!/^[\x21-\x7e]+$/.test(env.CIRCLE_TOKEN)) throw new CircleCIError("Configured CircleCI credential contains invalid whitespace or control characters");
 		this.projectPath = encodeProjectSlug(env.CIRCLE_PROJECT_SLUG);
 		this.fetcher = fetcher;
 	}
@@ -104,7 +105,13 @@ export class CircleCIClient {
 			});
 		} catch (error) {
 			if (error instanceof CircleCIError) throw error;
-			throw new CircleCIError("CircleCI request failed or timed out");
+			const name = error instanceof Error ? error.name : "UnknownError";
+			if (name === "TimeoutError" || name === "AbortError") throw new CircleCIError("CircleCI request timed out");
+			const message = error instanceof Error ? error.message : "";
+			if (/header/i.test(message)) throw new CircleCIError("CircleCI request header configuration failed");
+			if (/DNS|resolve/i.test(message)) throw new CircleCIError("CircleCI DNS resolution failed");
+			if (/TLS|SSL|certificate/i.test(message)) throw new CircleCIError("CircleCI TLS connection failed");
+			throw new CircleCIError("CircleCI network request failed");
 		}
 		if (!response.ok) throw safeError(response.status, response.headers.get("Retry-After"));
 		try {

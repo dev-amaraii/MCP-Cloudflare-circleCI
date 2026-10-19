@@ -120,3 +120,16 @@ test("reports CircleCI authorization and rate-limit failures without echoing cre
 		await assert.rejects(api.getPipeline(pipelineId), expected);
 	}
 });
+
+
+test("rejects malformed credential headers without leaking their value", () => {
+ const secret="private-token\n";
+ assert.throws(() => new CircleCIClient({CIRCLE_TOKEN:secret,CIRCLE_PROJECT_SLUG:projectSlug}), error => error instanceof Error && !error.message.includes("private-token") && /invalid whitespace/.test(error.message));
+});
+
+test("classifies network failures without returning exception details or credentials", async () => {
+ for (const [error,expected] of [[new DOMException("private-token", "TimeoutError"),"timed out"], [new TypeError("Invalid header: private-token"),"header configuration"], [new Error("DNS private-token"),"DNS resolution"], [new Error("TLS private-token"),"TLS connection"], [new Error("private-token"),"network request"]] as const) {
+  const api=client(async()=>{throw error;});
+  await assert.rejects(api.getPipeline(pipelineId),e=>e instanceof Error && e.message.includes(expected) && !e.message.includes("private-token"));
+ }
+});
