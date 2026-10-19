@@ -1,0 +1,42 @@
+version: 2.1
+
+jobs:
+  verify:
+    docker:
+      - image: cimg/node:24.13
+    resource_class: small
+    environment:
+      WRANGLER_LOG_PATH: .wrangler/logs
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-node24-npm-{{ checksum "package-lock.json" }}
+      - run:
+          name: Install locked dependencies
+          command: npm ci
+      - save_cache:
+          key: v1-node24-npm-{{ checksum "package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Type check
+          command: npm run check
+      - run:
+          name: Test read-only MCP and authentication
+          command: |
+            mkdir -p test-results
+            node --experimental-strip-types --test \
+              --test-reporter=spec --test-reporter-destination=stdout \
+              --test-reporter=junit --test-reporter-destination=test-results/node.xml \
+              tests/*.test.ts
+      - store_test_results:
+          path: test-results
+      - run:
+          name: Build Cloudflare Worker without deploying
+          command: npx wrangler deploy --dry-run
+
+workflows:
+  circleci-mcp:
+    jobs:
+      - verify

@@ -8,6 +8,9 @@ import type { AuthRequest, ClientInfo } from "@cloudflare/workers-oauth-provider
  * Represents errors that occur during OAuth operations with standardized error codes and descriptions.
  */
 export class OAuthError extends Error {
+	public code: string;
+	public description: string;
+	public statusCode: number;
 	/**
 	 * Creates a new OAuthError
 	 * @param code - The OAuth error code (e.g., "invalid_request", "invalid_grant")
@@ -15,12 +18,15 @@ export class OAuthError extends Error {
 	 * @param statusCode - HTTP status code to return (defaults to 400)
 	 */
 	constructor(
-		public code: string,
-		public description: string,
-		public statusCode = 400,
+		code: string,
+		description: string,
+		statusCode = 400,
 	) {
 		super(description);
 		this.name = "OAuthError";
+		this.code = code;
+		this.description = description;
+		this.statusCode = statusCode;
 	}
 
 	/**
@@ -296,6 +302,9 @@ export async function validateOAuthState(
 	}
 	const uuid = stateFromQuery.substring(0, dotIndex);
 	const hmac = stateFromQuery.substring(dotIndex + 1);
+	if (!/^[0-9a-f-]{36}$/i.test(uuid) || !/^[0-9a-f]{64}$/i.test(hmac)) {
+		throw new OAuthError("invalid_request", "Invalid state format", 400);
+	}
 
 	const isValid = await verifySignature(hmac, uuid, secret);
 	if (!isValid) {
@@ -310,7 +319,15 @@ export async function validateOAuthState(
 
 	let stored: { oauthReqInfo: AuthRequest; codeVerifier: string };
 	try {
-		stored = JSON.parse(storedDataJson) as { oauthReqInfo: AuthRequest; codeVerifier: string };
+		const parsed: unknown = JSON.parse(storedDataJson);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid state shape");
+		const candidate = parsed as Record<string, unknown>;
+		if (
+			!candidate.oauthReqInfo || typeof candidate.oauthReqInfo !== "object" || Array.isArray(candidate.oauthReqInfo) ||
+			typeof (candidate.oauthReqInfo as Record<string, unknown>).clientId !== "string" ||
+			typeof candidate.codeVerifier !== "string" || !/^[A-Za-z0-9_-]{43,128}$/.test(candidate.codeVerifier)
+		) throw new Error("Invalid state shape");
+		stored = candidate as unknown as { oauthReqInfo: AuthRequest; codeVerifier: string };
 	} catch (_e) {
 		throw new OAuthError("server_error", "Invalid state data", 500);
 	}
@@ -766,12 +783,19 @@ async function getApprovedClientsFromCookie(
 	if (!targetCookie) return null;
 
 	const cookieValue = targetCookie.substring(approvedClientsCookieName.length + 1);
+	if (cookieValue.length > 4096) return null;
 	const parts = cookieValue.split(".");
 
 	if (parts.length !== 2) return null;
 
 	const [signatureHex, base64Payload] = parts;
-	const payload = atob(base64Payload);
+	if (!/^[0-9a-f]{64}$/i.test(signatureHex!)) return null;
+	let payload: string;
+	try {
+		payload = atob(base64Payload!);
+	} catch {
+		return null;
+	}
 
 	const isValid = await verifySignature(signatureHex, payload, cookieSecret);
 
@@ -882,35 +906,48 @@ export async function fetchUpstreamAuthToken(params: {
 		code_verifier: params.code_verifier,
 	});
 
-	const response = await fetch(params.upstream_url, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/x-www-form-urlencoded",
-			Accept: "application/json",
-		},
-		body: data.toString(),
-	});
+	let response: Response;
+	try {
+		response = await fetch(params.upstream_url, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded",
+				Accept: "application/json",
+			},
+			body: data.toString(),
+			signal: AbortSignal.timeout(8_000),
+			redirect: "error",
+		});
+	} catch {
+		return [null, null, new Response("Unable to reach the identity provider", { status: 502 })];
+	}
 
 	if (!response.ok) {
-		const errorText = await response.text();
 		return [
 			null,
 			null,
-			new Response(`Failed to exchange code for token: ${errorText}`, {
-				status: response.status,
-			}),
+			new Response("Failed to exchange authorization code", { status: response.status }),
 		];
 	}
 
-	const body = (await response.json()) as any;
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		return [null, null, new Response("Invalid token response", { status: 502 })];
+	}
+	if (!body || typeof body !== "object" || Array.isArray(body)) {
+		return [null, null, new Response("Invalid token response", { status: 502 })];
+	}
+	const tokens = body as Record<string, unknown>;
 
-	const accessToken = body.access_token as string;
-	if (!accessToken) {
+	const accessToken = tokens.access_token;
+	if (typeof accessToken !== "string" || !accessToken) {
 		return [null, null, new Response("Missing access token", { status: 400 })];
 	}
 
-	const idToken = body.id_token as string;
-	if (!idToken) {
+	const idToken = tokens.id_token;
+	if (typeof idToken !== "string" || !idToken) {
 		return [null, null, new Response("Missing id token", { status: 400 })];
 	}
 	return [accessToken, idToken, null];
@@ -920,7 +957,6 @@ export async function fetchUpstreamAuthToken(params: {
  * Props interface for upstream provider user data
  */
 export interface Props {
-	accessToken: string;
 	email: string;
 	login: string;
 	name: string;

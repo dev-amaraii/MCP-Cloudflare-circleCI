@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import {
 	addApprovedClient,
@@ -13,6 +12,7 @@ import {
 	validateCSRFToken,
 	validateOAuthState,
 } from "./workers-oauth-utils";
+import { validateOidcConfiguration, verifyOidcIdToken, type OidcProviderOptions, type VerifiedOidcClaims } from "./oidc-claims";
 
 type EnvWithOauth = Env & { OAUTH_PROVIDER: OAuthHelpers };
 
@@ -29,6 +29,7 @@ export async function handleAccessRequest(
 		if (!clientId) {
 			return new Response("Invalid request", { status: 400 });
 		}
+		if (!(await oidcConfigurationIsValid(env))) return new Response("Authentication service unavailable", { status: 503 });
 
 		// Check if client is already approved — no approval form so no CSRF cookie to clear
 		if (await isClientApproved(request, clientId, env.COOKIE_ENCRYPTION_KEY)) {
@@ -37,7 +38,7 @@ export async function handleAccessRequest(
 				env.OAUTH_KV,
 				env.COOKIE_ENCRYPTION_KEY,
 			);
-			return redirectToAccess(request, env, stateToken, codeChallenge);
+			return redirectToAccess(env, stateToken, codeChallenge);
 		}
 
 		// Generate CSRF protection for the approval form
@@ -80,6 +81,7 @@ export async function handleAccessRequest(
 			if (!state.oauthReqInfo || !state.oauthReqInfo.clientId) {
 				return new Response("Invalid request", { status: 400 });
 			}
+			if (!(await oidcConfigurationIsValid(env))) return new Response("Authentication service unavailable", { status: 503 });
 
 			// Add client to approved list
 			const approvedClientCookie = await addApprovedClient(
@@ -100,9 +102,9 @@ export async function handleAccessRequest(
 			redirectHeaders.append("Set-Cookie", approvedClientCookie);
 			redirectHeaders.append("Set-Cookie", csrfResult.clearCookie);
 
-			return redirectToAccess(request, env, stateToken, codeChallenge, redirectHeaders);
+			return redirectToAccess(env, stateToken, codeChallenge, redirectHeaders);
 		} catch (error: any) {
-			console.error("POST /authorize error:", error);
+			console.error("POST /authorize failed");
 			if (error instanceof OAuthError) {
 				return error.toResponse();
 			}
@@ -135,25 +137,39 @@ export async function handleAccessRequest(
 		if (!oauthReqInfo.clientId) {
 			return new Response("Invalid OAuth request data", { status: 400 });
 		}
+		if (!(await oidcConfigurationIsValid(env))) return new Response("Authentication service unavailable", { status: 503 });
 
 		// Exchange the code for an access token, including the PKCE verifier
+		if (searchParams.has("error") || !searchParams.get("code")) {
+			return new Response("Authentication was not completed", { status: 400 });
+		}
+
 		const [accessToken, idToken, errResponse] = await fetchUpstreamAuthToken({
 			client_id: env.ACCESS_CLIENT_ID,
 			client_secret: env.ACCESS_CLIENT_SECRET,
 			code: searchParams.get("code") ?? undefined,
-			redirect_uri: new URL("/callback", request.url).href,
+			redirect_uri: callbackUri(env),
 			upstream_url: env.ACCESS_TOKEN_URL,
 			code_verifier: codeVerifier,
 		});
 		if (errResponse) {
 			return errResponse;
 		}
+		if (!idToken || !accessToken) return new Response("Authentication failed", { status: 401 });
 
-		const idTokenClaims = await verifyToken(env, idToken);
-		if (typeof idTokenClaims.email !== "string" || idTokenClaims.email.toLowerCase() !== "devops@amaraii.com") return new Response("Forbidden", {status:403});
+		let idTokenClaims: VerifiedOidcClaims;
+		try {
+			idTokenClaims = await verifyOidcIdToken({
+				...oidcProviderOptions(env),
+				token: idToken,
+				expectedEmail: "devops@amaraii.com",
+			});
+		} catch {
+			return new Response("Authentication failed", { status: 401 });
+		}
 		const user = {
 			email: idTokenClaims.email,
-			name: idTokenClaims.name,
+			name: typeof idTokenClaims.name === "string" ? idTokenClaims.name : idTokenClaims.email,
 			sub: idTokenClaims.sub,
 		};
 
@@ -164,7 +180,6 @@ export async function handleAccessRequest(
 			},
 			// This will be available on this.props inside MyMCP
 			props: {
-				accessToken,
 				email: user.email,
 				login: user.sub,
 				name: user.name,
@@ -180,8 +195,26 @@ export async function handleAccessRequest(
 	return new Response("Not Found", { status: 404 });
 }
 
+function oidcProviderOptions(env: Env): OidcProviderOptions {
+	return {
+		teamDomain: env.ACCESS_TEAM_DOMAIN,
+		clientId: env.ACCESS_CLIENT_ID,
+		authorizationUrl: env.ACCESS_AUTHORIZATION_URL,
+		tokenUrl: env.ACCESS_TOKEN_URL,
+		jwksUrl: env.ACCESS_JWKS_URL,
+	};
+}
+
+async function oidcConfigurationIsValid(env: Env): Promise<boolean> {
+	try {
+		await validateOidcConfiguration(oidcProviderOptions(env));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 async function redirectToAccess(
-	request: Request,
 	env: Env,
 	stateToken: string,
 	codeChallenge: string,
@@ -193,7 +226,7 @@ async function redirectToAccess(
 		getUpstreamAuthorizeUrl({
 			client_id: env.ACCESS_CLIENT_ID,
 			code_challenge: codeChallenge,
-			redirect_uri: new URL("/callback", request.url).href,
+			redirect_uri: callbackUri(env),
 			scope: "openid email profile",
 			state: stateToken,
 			upstream_url: env.ACCESS_AUTHORIZATION_URL,
@@ -202,74 +235,13 @@ async function redirectToAccess(
 	return new Response(null, { headers, status: 302 });
 }
 
-/**
- * Helper to get the Access public keys from the certs endpoint
- */
-async function fetchAccessPublicKey(env: Env, kid: string) {
-	if (!env.ACCESS_JWKS_URL) {
-		throw new Error("access jwks url not provided");
+function callbackUri(env: Env): string {
+	const base = new URL(env.MCP_PUBLIC_URL);
+	if (base.username || base.password || base.search || base.hash || base.pathname !== "/") {
+		throw new Error("Invalid MCP_PUBLIC_URL configuration");
 	}
-	// TODO: cache this
-	const resp = await fetch(env.ACCESS_JWKS_URL);
-	const keys = (await resp.json()) as {
-		keys: (JsonWebKey & { kid: string })[];
-	};
-	const jwk = keys.keys.filter((key) => key.kid === kid)[0];
-	const key = await crypto.subtle.importKey(
-		"jwk",
-		jwk,
-		{
-			hash: "SHA-256",
-			name: "RSASSA-PKCS1-v1_5",
-		},
-		false,
-		["verify"],
-	);
-	return key;
-}
-
-/**
- * Parse a JWT into its respective pieces. Does not do any validation other than form checking.
- */
-function parseJWT(token: string) {
-	const tokenParts = token.split(".");
-
-	if (tokenParts.length !== 3) {
-		throw new Error("token must have 3 parts");
+	if (base.protocol !== "https:" && !(base.hostname === "localhost" && base.protocol === "http:")) {
+		throw new Error("MCP_PUBLIC_URL must use HTTPS");
 	}
-
-	return {
-		data: `${tokenParts[0]}.${tokenParts[1]}`,
-		header: JSON.parse(Buffer.from(tokenParts[0], "base64url").toString()),
-		payload: JSON.parse(Buffer.from(tokenParts[1], "base64url").toString()),
-		signature: tokenParts[2],
-	};
-}
-
-/**
- * Validates the provided token using the Access public key set
- */
-async function verifyToken(env: Env, token: string) {
-	const jwt = parseJWT(token);
-	const key = await fetchAccessPublicKey(env, jwt.header.kid);
-
-	const verified = await crypto.subtle.verify(
-		"RSASSA-PKCS1-v1_5",
-		key,
-		Buffer.from(jwt.signature, "base64url"),
-		Buffer.from(jwt.data),
-	);
-
-	if (!verified) {
-		throw new Error("failed to verify token");
-	}
-
-	const claims = jwt.payload;
-	const now = Math.floor(Date.now() / 1000);
-	// Validate expiration
-	if (claims.exp < now) {
-		throw new Error("expired token");
-	}
-
-	return claims;
+	return new URL("/callback", base).href;
 }
