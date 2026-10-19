@@ -18,19 +18,19 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Ensure lockfile bootstrap is still required
+          name: Verify this is the reviewed security branch
           command: |
-            test ! -f package-lock.json || {
-              echo 'package-lock.json already exists. Review and use the validation workflow instead.' >&2
+            test "$CIRCLE_BRANCH" = "fix/oauth-claims-hardening" || {
+              echo 'Lockfile regeneration is permitted only for the reviewed security branch.' >&2
               exit 1
             }
       - run:
-          name: Resolve exact dependency versions without executing lifecycle scripts
+          name: Refresh lockfile for the current dependency manifest without running scripts
           command: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
       - run:
           name: Verify npm created a valid lockfile
           command: |
-            node -e 'const f=require("./package-lock.json"); if(f.lockfileVersion < 3 || !f.packages || !f.packages[""]) process.exit(1); console.log("Lockfile format verified:",f.lockfileVersion)'
+            node -e 'const f=require("./package-lock.json"),p=require("./package.json"),r=f.packages[""]; if(f.lockfileVersion !== 3 || f.name !== p.name || !r || JSON.stringify(r.dependencies) !== JSON.stringify(p.dependencies) || JSON.stringify(r.devDependencies) !== JSON.stringify(p.devDependencies) || JSON.stringify(r.engines) !== JSON.stringify(p.engines)) process.exit(1); console.log("Lockfile matches manifest; version",f.lockfileVersion)'
       - store_artifacts:
           path: package-lock.json
           destination: package-lock.json
