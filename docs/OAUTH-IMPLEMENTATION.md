@@ -1,38 +1,44 @@
-# Remote MCP OAuth implementation decision
+# NEN Cloudflare CircleCI MCP OAuth implementation
 
-## Current state (verified 2026-10-19)
-- Cloudflare self-hosted Access application `NEN CircleCI MCP` protects Worker `nen-circleci-mcp`, restricted to `devops@amaraii.com`.
-- Worker is **bootstrap-only**. No MCP routes, OAuth endpoints, or CircleCI actions are live.
-- The Worker has the CircleCI token as `secret_text`; other bindings exist.
-- A self-hosted Access application is **not** equivalent to an Access for SaaS OIDC application. The existing `ACCESS_AUD` identifies the self-hosted app; it does **not** supply OAuth client credentials or discovery endpoints for ChatGPT.
+## Verified 2026-10-19, live account (not inferred from repo)
 
-## Chosen path
-Follow Cloudflare's official `remote-mcp-cf-access` implementation using **Access for SaaS (OIDC)**, with its OAuth 2.0 authorization code flow and MCP-compatible discovery. Avoid rolling our own token issuance and consent.
+- Worker: `nen-circleci-mcp`. Deployed version `dcaea5a5-c331-4d0b-9ba5-b00b8754d8ff` (09:20 UTC). The deployed script includes four read-only CircleCI tool names but no OAuth `/authorize` or `/callback` route markers; source branch and live deployment **differ**.
+- Self-hosted Access app `NEN CircleCI MCP` and SaaS OIDC app `NEN CircleCI MCP OAuth` are **both created**. Both have a single Allow policy for `devops@amaraii.com` and no observed Bypass/Everyone rules.
+- SaaS OIDC callback configured as `https://nen-circleci-mcp.devops-948.workers.dev/callback`, scopes `openid email profile`, OIDC keys available. Binding names for upstream credentials, token URL, authorization URL, JWKS URL and cookie key are present as Worker secrets. Their values are not shown or copied.
+- Existing Worker also has encrypted `CIRCLE_TOKEN`. This does **not** prove a successful end-to-end API request through ChatGPT.
+- ChatGPT authentication is **not yet verified**. Never claim that a Worker with an Access policy automatically implements MCP OAuth 2.1.
 
-### Required Cloudflare configuration (not yet created)
-1. Create **a separate Access for SaaS application**, protocol OIDC, named `NEN CircleCI MCP OAuth`.
-2. Set callback URL to the Worker implementation's `/callback` endpoint on its final HTTPS hostname.
-3. Restrict its access policy to the same NEN email. Enable the existing One-time PIN identity provider.
-4. Obtain and store in Worker **secrets**:
-   - `ACCESS_CLIENT_ID`
-   - `ACCESS_CLIENT_SECRET`
-   - `ACCESS_TOKEN_URL`
-   - `ACCESS_AUTHORIZATION_URL`
-   - `ACCESS_JWKS_URL`
-   - `COOKIE_ENCRYPTION_KEY` (cryptographically random, 32 bytes or stronger).
-5. Provision `OAUTH_KV` as required by the official example. Do not commit KV IDs if policy forbids them; KV ID is not a credential.
-6. Adapt the example's authenticated MCP tools to our CircleCI client, with allowlisted project/branch and explicit confirmation on trigger.
-7. Check whether the existing self-hosted Worker Access app intercepts OAuth metadata, `/authorize`, `/callback`, or `/mcp` and prevents MCP clients from completing discovery. Adjust routing/protection only after verifying end-to-end token validation; **do not disable access merely to make the endpoint connect**.
+## Staged source — branch fix/oauth-claims-hardening
 
-## Release tests
-- Unauthenticated MCP tool requests denied; no token leakage in logs.
-- OAuth discovery and dynamic client registration (where required by ChatGPT) work.
-- Authorization code + PKCE, redirect URI checks, token audience/issuer/signature/expiry, and replay handling verified.
-- Identity not on allowlist denied.
-- Read-only CircleCI API tool works for configured project.
-- Trigger tool refuses invalid project/branch, and requires explicit confirmation.
-- A single confirmed test pipeline can be inspected end to end.
+The source uses Cloudflare Workers OAuth Provider with client registration, consent, Access for SaaS authorization code + PKCE, `/authorize`, `/callback`, and protected `/mcp` tools.
 
-## Docs
+Security improvements staged in GitHub:
+- Exact **path-scoped** Access for SaaS issuer, derived from the configured authorization endpoint and checked against team domain, client ID, token endpoint and JWKS endpoint. Using just `new URL(issuer).origin` would reject valid SaaS ID tokens.
+- RS256-only ID-token signature verification, explicit key ID and unique RSA JWKS key, pinned JWKS URL, and issuer/audience/authorized party, expiration, issued-at, not-before, subject and allowed email validation.
+- Signed, single-use KV approval state: no unsigned authorization request objects are accepted from a consent form. Existing form CSRF token retained.
+- Upstream OAuth error text redacted. Upstream Access token is no longer persisted inside MCP props.
+- Read-only tools are project-scoped: `circleci_pipeline_status`, `circleci_pipeline_workflows`, `circleci_workflow_jobs`, `circleci_job_details`. Trigger remains intentionally absent.
+
+Security tests are written under `tests/` but **not executed**. There is no lockfile; no deployment is authorized.
+
+## Release and integration steps
+
+1. Lock and audit dependencies, use Node >=22.18, run `npm run check` and `npm test`. Fix all failures before deployment.
+2. Inspect OIDC discovery issuer and values in SaaS app without exposing credentials. The ID token's `iss` must be the full `https://<team>.cloudflareaccess.com/cdn-cgi/access/sso/oidc/<client-id>` issuer; `aud` must identify the exact SaaS client.
+3. Test the existing self-hosted Access application against OAuth discovery, `/authorize`, `/callback`, `/register`, `/token`, and `/mcp`. Access could intercept client discovery even if the SaaS app is configured. Do **not** disable protection merely to get a connection.
+4. Deploy only after security-review approval. Verify unauthenticated denial, no open redirects, cookie and PKCE behavior, correct user allowlist, and callback replay denial. Exercise ChatGPT registration and initial read-only tools.
+5. Verify the previously successful CircleCI pipeline/workflow and job metadata; ensure foreign-project UUIDs fail.
+6. Implement mutating pipeline trigger **separately**, with approval, project and branch allowlists, audit logging, rate limiting, and explicit per-execution confirmation. Keep remote CI on demand.
+
+## Remaining risks / unknowns
+
+- KV `get` followed by `delete` is not atomic across concurrent requests; replay under race requires Durable Object or another atomic consume mechanism before production OAuth approval.
+- Self-hosted Access route interception versus OAuth discovery has not been tested in a browser or ChatGPT.
+- Cookie/session binding and external redirect allowlist require an end-to-end test.
+- Test execution, dependency lock, deployment and Chargeable CI verification remain outstanding.
+- Raw step logs may contain secrets and pre-signed temporary URLs; do not expose raw output until a guarded retrieval/redaction design is reviewed.
+
+References:
 - https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/secure-mcp-servers/
+- https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/saas-apps/generic-oidc-saas/
 - https://developers.cloudflare.com/agents/model-context-protocol/protocol/authorization/
