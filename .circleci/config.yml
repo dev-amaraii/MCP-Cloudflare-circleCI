@@ -30,7 +30,7 @@ jobs:
       - run:
           name: Verify npm created a valid lockfile
           command: |
-            node -e 'const f=require("./package-lock.json"),p=require("./package.json"),r=f.packages[""]; if(f.lockfileVersion !== 3 || f.name !== p.name || !r || JSON.stringify(r.dependencies) !== JSON.stringify(p.dependencies) || JSON.stringify(r.devDependencies) !== JSON.stringify(p.devDependencies) || JSON.stringify(r.engines) !== JSON.stringify(p.engines)) process.exit(1); console.log("Lockfile matches manifest; version",f.lockfileVersion)'
+            node -e 'const f=require("./package-lock.json"),p=require("./package.json"),r=f.packages[""]; if(f.lockfileVersion !== 3 || f.name !== p.name || !r || JSON.stringify(r.dependencies) !== JSON.stringify(p.dependencies) || JSON.stringify(r.devDependencies) !== JSON.stringify(p.devDependencies) || JSON.stringify(r.engines) !== JSON.stringify(p.engines)) process.exit(1); const sdk=f.packages["node_modules/@modelcontextprotocol/sdk"]; if(sdk?.version !== "1.29.0" || Object.keys(f.packages).some(k => /node_modules\\/.*node_modules\\/@modelcontextprotocol\\/sdk$/.test(k))) { console.error("MCP SDK must be installed only once at 1.29.0"); process.exit(1); } console.log("Lockfile matches manifest and single MCP SDK; version",f.lockfileVersion)'
       - store_artifacts:
           path: package-lock.json
           destination: package-lock.json
