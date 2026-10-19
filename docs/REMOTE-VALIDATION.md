@@ -12,9 +12,8 @@ change Cloudflare Access settings, or trigger CircleCI automatically.
 - Both workflow jobs use the Node 24.13 CircleCI image, with no CircleCI
   contexts, Cloudflare credentials, GitHub write token, or CircleCI token.
 - **Lockfile regeneration COMPLETED:** CircleCI bootstrap pipeline **#34** succeeded on `fix/oauth-claims-hardening`, checking the aligned SDK version and uploading an artifact. The user supplied this lockfile, which passed manifest, single-SDK and registry/integrity metadata checks; the new `package-lock.json` was committed at `fe9cbb97ade30c42025b57b26999dbf3a7d1dfeb` (blob `483b7c0f8a0f4f14ffc212c3935741210fc83224`). Next run is manual full validation, **not** another bootstrap.
-- Config YAML was parsed locally and manual-guard defaults were inspected.
-  This is **not** a CircleCI config compile, pipeline execution or full test pass.
-- CircleCI **validation #33/#35** failed TypeScript checks, but **validation #36** passed `npm ci` and the full Worker TypeScript check. Of 62 native tests, 61 passed; one consent-cookie assertion failed because its helper dropped Set-Cookie attributes. The test was corrected on the draft branch at `c0dd989d` and awaits a new manual CircleCI validation run. Wrangler dry-run has not run yet.
+- The committed config has now been executed repeatedly in CircleCI, including the **fully passing manual validation #37** on commit `fb1b6dc1`. The Boolean guards still default false and the GitHub event trigger remains disabled.
+- **VALIDATION PASSED:** [CircleCI #37](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/4QT9iy1PpGnXx8VQDfdzLm/37/workflows/ce031928-1a35-4709-87b1-42f54fa47cd8/jobs/8), `fix/oauth-claims-hardening` at commit `fb1b6dc1`, took 31 seconds. The checkout, lockfile check, `npm ci`, full `npm run check`, all tests and Wrangler `deploy --dry-run` were all green. GitHub commit status independently reports `ci/circleci: validate` **success** for the same commit. No production deploy.
 
 ## 1. One-time CircleCI project setup (requires CircleCI web UI)
 
@@ -60,7 +59,7 @@ as a CircleCI artifact. No dependency scripts and no deploy are run.
 
 **Refresh completed:** The artifact produced by CircleCI pipeline #34 was reviewed and committed. The new npm lockfile v3 contains 290 package records, a single root MCP SDK `1.29.0`, and 289 resolved registry packages with SHA-512 integrity metadata. GitHub readback confirms blob SHA `483b7c0f8a0f4f14ffc212c3935741210fc83224`. Do not rerun bootstrap unless dependencies change.
 
-## 3. Re-run full validation — NEXT: after correcting the #36 test assertion
+## 3. Run full validation on demand (COMPLETED in pipeline #37)
 
 Again, **requires a separately approved CircleCI execution**.
 Trigger Pipeline with the same two branches and:
@@ -90,6 +89,8 @@ and explicit parameters, after the MCP project has been set up.
 The existing Jayson definition ID is **not** valid for this repository.
 
 ## Security gates after passing CircleCI
+
+**Full repository CI passed at `fb1b6dc1`. Documentation-only follow-ups may add later commits without another CI run, since automatic triggers are intentionally disabled. Do not conflate a green historic code commit with a newer untested code change.**
 
 Running the above proves only the repository's build and unit-test health.
 It does **not** verify production OAuth, Cloudflare Access routing,
