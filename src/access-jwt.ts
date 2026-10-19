@@ -53,8 +53,13 @@ export async function verifyAccessIdToken(
   const key = await crypto.subtle.importKey(
     "jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"],
   );
+  // Workers WebCrypto expects ArrayBuffer-backed BufferSource values. Node Buffer
+  // types permit SharedArrayBuffer, so copy explicitly instead of asserting.
+  const signature = new Uint8Array(new ArrayBuffer(jwt.signature.byteLength));
+  signature.set(jwt.signature);
+  const data = new TextEncoder().encode(jwt.data);
   const signed = await crypto.subtle.verify(
-    "RSASSA-PKCS1-v1_5", key, jwt.signature, Buffer.from(jwt.data),
+    "RSASSA-PKCS1-v1_5", key, signature.buffer, data.buffer,
   );
   if (!signed) throw new Error("Invalid JWT signature");
   validateOidcClaims(jwt.claims, issuer, env.ACCESS_CLIENT_ID, "devops@amaraii.com", now);
