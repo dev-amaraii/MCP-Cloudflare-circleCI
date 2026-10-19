@@ -1,4 +1,4 @@
-import { verifyAccessIdToken } from "./access-jwt";
+import { verifyAccessIdToken } from "./access-jwt.ts";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import {
 	addApprovedClient,
@@ -14,7 +14,7 @@ import {
 	renderApprovalDialog,
 	validateCSRFToken,
 	validateOAuthState,
-} from "./workers-oauth-utils";
+} from "./workers-oauth-utils.ts";
 
 type EnvWithOauth = Env & { OAUTH_PROVIDER: OAuthHelpers };
 
