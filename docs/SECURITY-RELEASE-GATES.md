@@ -15,10 +15,12 @@ Last audited against Cloudflare API: **2026-10-19**.
 - [x] Verify existing Cloudflare account, Access policies and bindings.
 - [x] Add fail-closed app-pinned SaaS OIDC verification and unit tests on a separate branch.
 - [x] Protect OAuth client consent from unsigned request state; avoid persisting upstream Access token.
+- [x] Stage atomic SQLite Durable Object nonce-consumption gate for OAuth callback and consent; isolated tests 5/5 and 20-request SQLite race check passed (1 accepted).
 - [x] Restrict read-only CircleCI tools to the configured project; expose workflow jobs/job metadata.
 - [x] Keep CircleCI trigger tool disabled and **do not deploy** the unverified security branch.
-- [ ] Pin/lock dependencies; run `npm run check` and `npm test` using Node >=22.18 and record results.
-- [ ] Review state replay for concurrent callbacks (KV get/delete not atomic) and remediate before production.
+- [x] Run isolated exact-blob test coverage for OIDC/JWT, project-scoped CircleCI reads, and nonce guard: **49/49 passed** on Node 22.16 with experimental TS stripping; focused typecheck with test-only shims passed.
+- [ ] Pin/lock dependencies; run **full** `npm run check` and `npm test` using Node >=22.18 (including OAuth state test suite), record results.
+- [ ] Verify new `OAuthReplayGuard` Durable Object binding and v2 migration in workerd; inspect callback and consent integration under real concurrent requests. The code mitigation is staged, not live.
 - [ ] Verify Access for SaaS discovery issuer and actual OIDC token shape against strict validation.
 - [ ] Verify that self-hosted Access does not break OAuth metadata, registration, token or callback routes.
 - [ ] Manually test anonymous `/mcp` denial and unauthorized identity rejection.
