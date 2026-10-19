@@ -131,7 +131,11 @@ test("tampered callback cookie is rejected", async () => {
 
 test("upstream OAuth errors do not expose upstream response bodies", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response("private-token-leak-marker", { status: 401 });
+  globalThis.fetch = async (_url, init) => {
+    assert.equal(init?.method, "POST");
+    assert.equal(init?.redirect, "error");
+    return new Response("private-token-leak-marker", { status: 401 });
+  };
   try {
     const [accessToken, idToken, response] = await fetchUpstreamAuthToken({
       upstream_url: "https://idp.example/token",
