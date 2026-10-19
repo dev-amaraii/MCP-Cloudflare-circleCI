@@ -1,0 +1,52 @@
+# NEN CircleCI MCP: STAGING-ONLY TEMPLATE (not deploy-ready).
+# Copy to ignored wrangler.staging.toml after separate staging resource approval.
+# Always use: npx wrangler deploy --config wrangler.staging.toml
+# Never change the production wrangler.toml as part of staging setup.
+#
+# Safe by default: no workers.dev endpoint, route, or custom domain.
+# Access policy must be verified BEFORE enabling workers_dev or adding routes.
+name = "nen-circleci-mcp-staging"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+# Resource MUST be a new staging-only KV namespace, never production's
+# b27a78e5d8a8447ea233f0e7c92459d4.
+# This deliberately invalid placeholder blocks deployment until configured.
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "REPLACE_WITH_NEW_STAGING_KV_NAMESPACE_ID"
+
+# Both Durable Object classes are owned by this separate Worker script;
+# check SQLite migration results on its FIRST deployment.
+[[durable_objects.bindings]]
+name = "MCP_OBJECT"
+class_name = "CircleMCP"
+
+[[durable_objects.bindings]]
+name = "OAUTH_REPLAY_GUARD"
+class_name = "OAuthReplayGuard"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CircleMCP"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["OAuthReplayGuard"]
+
+# Only publicly nonsecret identifiers belong here; this is the MCP
+# project, NOT the unrelated Jayson storefront project.
+[vars]
+CIRCLE_PROJECT_SLUG = "circleci/B65DMdC1ZhAJQM74t7SrZ1/4QT9iy1PpGnXx8VQDfdzLm"
+CIRCLE_DEFINITION_ID = "efb046dd-5d13-43b7-a979-a7bf66243da6"
+
+# Before an approved staging deployment, provision STAGING-ONLY bindings:
+# CIRCLE_TOKEN (read-only usage), COOKIE_ENCRYPTION_KEY,
+# ACCESS_CLIENT_ID, ACCESS_CLIENT_SECRET,
+# ACCESS_AUTHORIZATION_URL, ACCESS_TOKEN_URL, ACCESS_JWKS_URL,
+# ACCESS_TEAM_DOMAIN, ACCESS_AUD, and MCP_PUBLIC_URL as appropriate.
+# These MUST be configured against the staging Worker, never copied from
+# live secrets. Never put actual secret values in git.
+# See docs/STAGING-READINESS.md for routing, Access and OAuth gates.
