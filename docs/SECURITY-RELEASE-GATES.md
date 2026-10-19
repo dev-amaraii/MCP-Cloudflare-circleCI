@@ -21,8 +21,10 @@ Last audited against Cloudflare API: **2026-10-19**.
 - [x] Keep CircleCI trigger tool disabled and **do not deploy** the unverified security branch.
 - [x] Run isolated exact-blob test coverage for OIDC/JWT, project-scoped CircleCI reads, and nonce guard: **49/49 passed** on Node 22.16 with experimental TS stripping; focused typecheck with test-only shims passed.
 - [x] Run `oauth-state.test.mjs` against the latest GitHub source in an isolated JS harness with TypeScript annotations removed and test adapters: **10/10 passed**. New handler tests passed syntax parsing but were not executed.
-- [x] Commit and statically review npm lockfile v3 (`package-lock.json`): 292 package records; root manifest matches; all 291 resolved package entries have npm-registry URLs and SHA-512 integrity metadata. Git blob `c0936d721bc011a0f18923a50af07c1b7fb69596`; commit `052a61c9`. This is **not** an npm install, audit or full test pass.
-- [ ] Run `npm ci`, **full** `npm run check` and `npm test` using Node >=22.18 (including the new `access-handler` suite), then Wrangler `deploy --dry-run` and record results.
+- [x] First lockfile artifact reviewed/committed (`052a61c9`); historic blob `c0936d721bc011a0f18923a50af07c1b7fb69596`. **SUPERSEDED by changed SDK manifest** after CircleCI #33 failed TypeScript; this old lockfile is no longer valid for `npm ci`. New lockfile refresh and review required before passing this release gate.
+- [ ] Rebuild and review lockfile for root SDK `1.29.0`, ensuring a single installed SDK copy compatible with Agents.
+- [ ] Re-run `npm ci` and **full** `npm run check` (CircleCI #33 reached typecheck but failed with TS2307, TS2345 and TS2416). Staged fixes: include `node` TS types, copy BufferSource into owned ArrayBuffer, and align SDK version.
+- [ ] After full `check` passes, run `npm test` including the handler suite, then Wrangler `deploy --dry-run` and record results.
 - [ ] Run the full OAuth handler tests under real Node 22.18+ and workerd; verify browser-bound cookies on both consent and prior-approval flows. Isolated state tests are not a substitute.
 - [ ] Verify new `OAuthReplayGuard` Durable Object binding and v2 migration in workerd; inspect callback and consent integration under real concurrent requests. The code mitigation is staged, not live.
 - [ ] Verify Access for SaaS discovery issuer and actual OIDC token shape against strict validation.
