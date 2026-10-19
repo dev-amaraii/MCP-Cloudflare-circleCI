@@ -86,7 +86,7 @@ export async function handleAccessRequest(
 			const stateUrl = new URL("/callback", request.url);
 			stateUrl.searchParams.set("state", state.approvalStateToken);
 			const { oauthReqInfo } = await validateOAuthState(
-				new Request(stateUrl), env.OAUTH_KV, env.COOKIE_ENCRYPTION_KEY,
+				new Request(stateUrl), env.OAUTH_KV, env.COOKIE_ENCRYPTION_KEY, env.OAUTH_REPLAY_GUARD,
 			);
 			if (!oauthReqInfo.clientId) {
 				return new Response("Invalid request", { status: 400 });
@@ -132,6 +132,7 @@ export async function handleAccessRequest(
 				request,
 				env.OAUTH_KV,
 				env.COOKIE_ENCRYPTION_KEY,
+				env.OAUTH_REPLAY_GUARD,
 			);
 			oauthReqInfo = result.oauthReqInfo;
 			codeVerifier = result.codeVerifier;
