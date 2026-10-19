@@ -166,6 +166,9 @@ export async function handleAccessRequest(
 		if (errResponse) {
 			return errResponse;
 		}
+		if (typeof idToken !== "string" || !idToken) {
+			return new Response("Missing ID token", { status: 502 });
+		}
 
 		let idTokenClaims: Awaited<ReturnType<typeof verifyAccessIdToken>>;
 		try {
