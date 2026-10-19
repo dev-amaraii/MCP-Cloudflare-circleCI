@@ -72,7 +72,16 @@ test("first-time consent stays CSRF-protected and redirects with browser-bound s
   assert.ok(approved.headers.get("location").startsWith(UPSTREAM + "/authorization"));
   assert.ok(getCookie(approved, "__Host-OAUTH_STATE="));
   assert.ok(getCookie(approved, "__Host-APPROVED_CLIENTS="));
-  assert.ok(getCookie(approved, "__Host-CSRF_TOKEN=")?.startsWith("__Host-CSRF_TOKEN=;"));
+  // getCookie() returns only the name=value pair, so it cannot verify the
+  // expiration attributes that follow the first semicolon in Set-Cookie.
+  const csrfClearCookies = approved.headers.getSetCookie()
+    .filter((value) => value.startsWith("__Host-CSRF_TOKEN="));
+  assert.equal(csrfClearCookies.length, 1);
+  assert.match(csrfClearCookies[0], /^__Host-CSRF_TOKEN=;/);
+  assert.match(csrfClearCookies[0], /(?:^|;\\s*)Max-Age=0(?:;|$)/i);
+  assert.match(csrfClearCookies[0], /(?:^|;\\s*)Secure(?:;|$)/i);
+  assert.match(csrfClearCookies[0], /(?:^|;\\s*)HttpOnly(?:;|$)/i);
+  assert.match(csrfClearCookies[0], /(?:^|;\\s*)Path=\\/(?:;|$)/i);
 
   const callback = new URL(approved.headers.get("location")).searchParams.get("state");
   const stateCookie = getCookie(approved, "__Host-OAUTH_STATE=");
