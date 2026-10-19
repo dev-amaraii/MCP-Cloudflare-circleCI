@@ -28,6 +28,8 @@ Last audited against Cloudflare API: **2026-10-19**.
 - [x] CircleCI **#37 passed `npx --no-install wrangler deploy --dry-run`**, confirming successful Worker bundling under CI without publishing or modifying Cloudflare. This does not validate actual workerd bindings, D1/KV/DO migration, Cloudflare Access or OAuth integration.
 - [x] Execute committed OAuth handler unit tests under CircleCI Node 24.13: included in full passing suite #37 (including consent and prior-approval browser-cookie assertions using simulated responses). These are Node tests, **not workerd/real-browser integration tests**.
 - [ ] Run OAuth handler and cookie integration under real workerd and an authorized browser/client; verify both consent and prior-approval sessions end-to-end.
+- [x] Prepare [isolated staging plan](STAGING-READINESS.md), nonpublic [Wrangler template](../wrangler.staging.example.toml), and ignore the local staging resource config. Read-only Cloudflare audit confirms the existing live Worker has no OAuth KV/DO bindings and no staging Worker is present.
+- [ ] Obtain separate approval to create staging-only KV, Worker and restricted Access/OIDC applications. Deploy initially with **no public endpoint**; then verify Access protection before enabling a staging URL. Never reuse production KV, Access client or secrets.
 - [ ] Verify new `OAuthReplayGuard` Durable Object binding and v2 migration in workerd; inspect callback and consent integration under real concurrent requests. The code mitigation is staged, not live.
 - [ ] Verify Access for SaaS discovery issuer and actual OIDC token shape against strict validation.
 - [ ] Verify that self-hosted Access does not break OAuth metadata, registration, token or callback routes.
