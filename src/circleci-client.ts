@@ -101,7 +101,7 @@ export class CircleCIClient {
 				method: "GET",
 				headers: { "Circle-Token": this.env.CIRCLE_TOKEN, Accept: "application/json" },
 				signal: AbortSignal.timeout(10_000),
-				redirect: "error",
+				redirect: "manual",
 			});
 		} catch (error) {
 			if (error instanceof CircleCIError) throw error;
@@ -111,7 +111,8 @@ export class CircleCIClient {
 			if (/header/i.test(message)) throw new CircleCIError("CircleCI request header configuration failed");
 			if (/DNS|resolve/i.test(message)) throw new CircleCIError("CircleCI DNS resolution failed");
 			if (/TLS|SSL|certificate/i.test(message)) throw new CircleCIError("CircleCI TLS connection failed");
-			throw new CircleCIError("CircleCI network request failed");
+			const detail = message.replaceAll(this.env.CIRCLE_TOKEN, "[redacted]").replace(/https?:\/\/\S+/g, "[url]").slice(0, 300);
+			throw new CircleCIError(`CircleCI network request failed (${name}: ${detail})`);
 		}
 		if (!response.ok) throw safeError(response.status, response.headers.get("Retry-After"));
 		try {
@@ -248,7 +249,7 @@ export class CircleCIClient {
 				method: "GET",
 				headers: { Accept: "application/json, text/plain" },
 				signal: AbortSignal.timeout(10_000),
-				redirect: "error",
+				redirect: "manual",
 			});
 		} catch {
 			throw new CircleCIError("Unable to fetch CircleCI job output");

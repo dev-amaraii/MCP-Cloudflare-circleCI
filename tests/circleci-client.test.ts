@@ -128,9 +128,9 @@ test("rejects malformed credential headers without leaking their value", () => {
 });
 
 test("classifies network failures without returning exception details or credentials", async () => {
- for (const [error,expected] of [[new DOMException("private-token", "TimeoutError"),"timed out"], [new TypeError("Invalid header: private-token"),"header configuration"], [new Error("DNS private-token"),"DNS resolution"], [new Error("TLS private-token"),"TLS connection"], [new Error("private-token"),"network request"]] as const) {
+ for (const [error,expected] of [[new DOMException("test-token", "TimeoutError"),"timed out"], [new TypeError("Invalid header: test-token"),"header configuration"], [new Error("DNS test-token"),"DNS resolution"], [new Error("TLS test-token"),"TLS connection"], [new Error("test-token"),"network request"]] as const) {
   const api=client(async()=>{throw error;});
-  await assert.rejects(api.getPipeline(pipelineId),e=>e instanceof Error && e.message.includes(expected) && !e.message.includes("private-token"));
+  await assert.rejects(api.getPipeline(pipelineId),e=>e instanceof Error && e.message.includes(expected) && !e.message.includes("test-token"));
  }
 });
 
