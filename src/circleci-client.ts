@@ -111,8 +111,7 @@ export class CircleCIClient {
 			if (/header/i.test(message)) throw new CircleCIError("CircleCI request header configuration failed");
 			if (/DNS|resolve/i.test(message)) throw new CircleCIError("CircleCI DNS resolution failed");
 			if (/TLS|SSL|certificate/i.test(message)) throw new CircleCIError("CircleCI TLS connection failed");
-			const detail = message.replaceAll(this.env.CIRCLE_TOKEN, "[redacted]").replace(/https?:\/\/\S+/g, "[url]").slice(0, 300);
-			throw new CircleCIError(`CircleCI network request failed (${name}: ${detail})`);
+			throw new CircleCIError("CircleCI network request failed");
 		}
 		if (!response.ok) throw safeError(response.status, response.headers.get("Retry-After"));
 		try {
@@ -146,8 +145,13 @@ export class CircleCIClient {
 	}
 
 	async getProjectStatus(pageToken?: string): Promise<Record<string, unknown>> {
-		const project = asRecord(await this.getV2(`/project/${this.projectPath}`));
-		const pipelines = await this.getPage(`/project/${this.projectPath}/pipeline`, pageToken);
+		const stage = async (label: string, operation: () => Promise<Record<string, unknown>>) => {
+			try { return await operation(); } catch (error) {
+				throw new CircleCIError(`${label}: ${error instanceof CircleCIError ? error.message : "request failed"}`);
+			}
+		};
+		const project = await stage("Project lookup", async () => asRecord(await this.getV2(`/project/${this.projectPath}`)));
+		const pipelines = await stage("Pipeline listing", () => this.getPage(`/project/${this.projectPath}/pipeline`, pageToken));
 		return { project, pipelines };
 	}
 
