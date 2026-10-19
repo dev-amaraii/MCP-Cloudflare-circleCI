@@ -1,5 +1,4 @@
-import { Buffer } from "node:buffer";
-import { validateOidcClaims } from "./oidc-claims";
+import { verifyAccessIdToken } from "./access-jwt";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import {
 	addApprovedClient,
@@ -150,10 +149,9 @@ export async function handleAccessRequest(
 			return errResponse;
 		}
 
-		let idTokenClaims: Record<string, any>;
+		let idTokenClaims: Awaited<ReturnType<typeof verifyAccessIdToken>>;
 		try {
-			idTokenClaims = await verifyToken(env, idToken);
-			validateOidcClaims(idTokenClaims, env.ACCESS_TEAM_DOMAIN, env.ACCESS_CLIENT_ID, "devops@amaraii.com");
+			idTokenClaims = await verifyAccessIdToken(env, idToken);
 		} catch {
 			return new Response("Forbidden", { status: 403 });
 		}
@@ -206,80 +204,4 @@ async function redirectToAccess(
 		}),
 	);
 	return new Response(null, { headers, status: 302 });
-}
-
-/**
- * Helper to get the Access public keys from the certs endpoint
- */
-async function fetchAccessPublicKey(env: Env, kid: string) {
-	if (!env.ACCESS_JWKS_URL) {
-		throw new Error("access jwks url not provided");
-	}
-	// TODO: cache this
-	const resp = await fetch(env.ACCESS_JWKS_URL);
-	const keys = (await resp.json()) as {
-		keys: (JsonWebKey & { kid: string })[];
-	};
-	const jwk = keys.keys.find((key) => key.kid === kid && key.kty === "RSA");
-	if (!jwk) throw new Error("Unknown signing key");
-	const key = await crypto.subtle.importKey(
-		"jwk",
-		jwk,
-		{
-			hash: "SHA-256",
-			name: "RSASSA-PKCS1-v1_5",
-		},
-		false,
-		["verify"],
-	);
-	return key;
-}
-
-/**
- * Parse a JWT into its respective pieces. Does not do any validation other than form checking.
- */
-function parseJWT(token: string) {
-	const tokenParts = token.split(".");
-
-	if (tokenParts.length !== 3) {
-		throw new Error("token must have 3 parts");
-	}
-
-	return {
-		data: `${tokenParts[0]}.${tokenParts[1]}`,
-		header: JSON.parse(Buffer.from(tokenParts[0], "base64url").toString()),
-		payload: JSON.parse(Buffer.from(tokenParts[1], "base64url").toString()),
-		signature: tokenParts[2],
-	};
-}
-
-/**
- * Validates the provided token using the Access public key set
- */
-async function verifyToken(env: Env, token: string) {
-	const jwt = parseJWT(token);
-	if (jwt.header.alg !== "RS256" || typeof jwt.header.kid !== "string") {
-		throw new Error("Unsupported JWT algorithm");
-	}
-	const key = await fetchAccessPublicKey(env, jwt.header.kid);
-
-	const verified = await crypto.subtle.verify(
-		"RSASSA-PKCS1-v1_5",
-		key,
-		Buffer.from(jwt.signature, "base64url"),
-		Buffer.from(jwt.data),
-	);
-
-	if (!verified) {
-		throw new Error("failed to verify token");
-	}
-
-	const claims = jwt.payload;
-	const now = Math.floor(Date.now() / 1000);
-	// Validate expiration
-	if (claims.exp < now) {
-		throw new Error("expired token");
-	}
-
-	return claims;
 }
