@@ -22,7 +22,7 @@ function fakeFetch(log) {
   return async (url, init) => {
     log.push({url, init});
     if (url.endsWith('/pipeline/run')) return new Response(JSON.stringify({id:pipelineId,number:7,state:'pending'}), {status:201,headers:{'Content-Type':'application/json'}});
-    if (url.endsWith('/pipeline/' + pipelineId)) return Response.json({id:pipelineId,number:7,state:'created',vcs:{branch:'feat/storefront-demo',revision:'abc'}});
+    if (url.endsWith('/pipeline/' + pipelineId)) return Response.json({id:pipelineId,number:7,state:'created',project_slug:PROJECTS['jayson-storefront'].slug,vcs:{branch:'feat/storefront-demo',revision:'abc'}});
     if (url.endsWith('/pipeline/' + pipelineId + '/workflow')) return Response.json({items:[{id:id,name:'manually-requested-preview-qa',status:'success'}]});
     if (url.endsWith('/workflow/' + id + '/job')) return Response.json({items:[{id:'job1',name:'preview-qa',status:'success',job_number:12}]});
     if (url.endsWith('/12/artifacts')) return Response.json({items:[{path:'qa-intel/qa-intel-output.json',url:'https://example.circle-artifacts.com/qa.json'}]});
@@ -126,4 +126,14 @@ test('forwards only CircleCI HTTP status, not response payloads, on API errors',
    executeCommand({CIRCLE_TOKEN:'placeholder-token'},validated.command,validated.project,async()=>new Response('sensitive upstream detail',{status:403})),
    /CircleCI API HTTP 403/
  );
+});
+
+test('inspect rejects a pipeline outside the registered project before revealing jobs',async()=>{
+ const validated=validateCommand(command('inspect',{pipelineId}),id,now);
+ let calls=0;
+ await assert.rejects(executeCommand({CIRCLE_TOKEN:'placeholder-token'},validated.command,validated.project,async()=>{
+  calls++;
+  return Response.json({id:pipelineId,project_slug:'circleci/other-project/different-repo',state:'created'});
+ }),/Pipeline project mismatch/);
+ assert.equal(calls,1);
 });
