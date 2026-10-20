@@ -268,3 +268,27 @@ test('job diagnosis reads modern step statuses without raw outputs or URLs', asy
  assert.equal(JSON.stringify(result).includes('secret'),false);
  assert.equal(JSON.stringify(result).includes('echo protected'),false);
 });
+
+test('v3 job steps require verified pipeline ownership and redact output',async()=>{
+ const jobId='e2d2108c-b482-4a9f-afeb-60863cccd707';
+ const validated=validateCommand(command('job_steps',{jobId,jobNumber:11,pipelineId}),id,now);
+ const calls=[];
+ const result=await executeCommand({CIRCLE_TOKEN:'redacted-token'},validated.command,validated.project,async(url,init)=>{
+  calls.push({url,init});
+  if(url.endsWith('/pipeline/'+pipelineId)) return Response.json({project_slug:PROJECTS['jayson-storefront'].slug});
+  if(url.endsWith('/pipeline/'+pipelineId+'/workflow')) return Response.json({items:[{id} ]});
+  if(url.endsWith('/workflow/'+id+'/job')) return Response.json({items:[{id:jobId,job_number:11,project_slug:PROJECTS['jayson-storefront'].slug}]});
+  if(url.endsWith('/api/v3/jobs/'+jobId)) return Response.json({id:jobId,status:'failed',executions:[{index:0,steps:[{name:'Verify approved artifact',status:'failed',exit_code:1,output_url:'never-return',command:'never-return'}]}]});
+  return new Response('not found',{status:404});
+ });
+ assert.equal(calls.length,4);
+ assert.equal(result.executions[0].steps[0].exitCode,1);
+ assert.equal(calls[3].init.headers.Authorization,'Bearer redacted-token');
+ assert.equal(JSON.stringify(result).includes('never-return'),false);
+ assert.equal(JSON.stringify(result).includes('redacted-token'),false);
+ assert.throws(()=>validateCommand(command('job_steps',{jobId,jobNumber:11,pipelineId,mode:'preview_qa'}),id,now),/Job steps have unexpected fields/);
+ const denied=await assert.rejects(executeCommand({CIRCLE_TOKEN:'redacted-token'},validated.command,validated.project,async(url)=>{
+  if(url.endsWith('/pipeline/'+pipelineId))return Response.json({project_slug:'circleci/forbidden/repository'});
+  throw Error('must not request job steps');
+ }),/Pipeline project mismatch/);
+});
