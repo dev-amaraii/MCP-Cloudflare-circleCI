@@ -226,3 +226,27 @@ test('normal QA trigger cannot activate a release workflow', async () => {
  assert.deepEqual(JSON.parse(calls[0].init.body).parameters,{run_preview_qa:true});
  assert.equal(JSON.stringify(calls[0].init.body).includes('run_preview_release'),false);
 });
+
+test('scoped job diagnosis returns vetted fields but not logs or bearer tokens', async()=>{
+ const cmd=command('job',{jobNumber:11});
+ const approved=validateCommand(cmd,id,now);
+ const log=[];
+ const outcome=await executeCommand({CIRCLE_TOKEN:'must-stay-private'},approved.command,approved.project,async(url,init)=>{
+  log.push({url,init});
+  return Response.json({
+   project:{slug:PROJECTS['jayson-storefront'].slug},name:'deploy-preview',status:'failed',
+   started_at:'2026-10-20T14:06:00Z',
+   steps:[{name:'Check Pages token',actions:[{status:'failed',exit_code:1,output_url:'https://temporary-secret-url'}]}],
+   environment:{CLOUDFLARE_API_TOKEN:'must-stay-private'},
+  });
+ });
+ assert.equal(outcome.jobNumber,11);
+ assert.equal(outcome.status,'failed');
+ assert.equal(outcome.steps[0].actions[0].exitCode,1);
+ assert.equal(JSON.stringify(outcome).includes('must-stay-private'),false);
+ assert.equal(JSON.stringify(outcome).includes('temporary-secret-url'),false);
+ assert.equal(log.length,1);
+ assert.equal(log[0].url,'https://circleci.com/api/v2/project/'+PROJECTS['jayson-storefront'].slug+'/job/11');
+ assert.throws(()=>validateCommand(command('job',{jobNumber:0}),id,now),/Invalid job number/);
+ assert.throws(()=>validateCommand(command('job',{jobNumber:11,mode:'preview_qa'}),id,now),/Job inspection has unexpected fields/);
+});
