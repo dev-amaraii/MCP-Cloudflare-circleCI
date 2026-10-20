@@ -246,22 +246,35 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
       }
     }
     if (!found) throw new Error('Job does not belong to approved pipeline');
-    const job = await circleV3Request(env,'/jobs/' + command.jobId,requestFn);
-    if (job.id !== command.jobId) throw new Error('Job identity mismatch');
+    const response = await circleV3Request(env,'/jobs/' + command.jobId,requestFn);
+    // API v3 wraps single resources in {data:{id,attributes,references}}.
+    const job = isPlainObject(response?.data) ? response.data : response;
+    if (job?.id !== command.jobId) throw new Error('Job identity mismatch');
+    const attrs = isPlainObject(job.attributes) ? job.attributes : job;
+    const rawExecutions = attrs.parallel_executions ?? attrs.executions ?? job.executions ?? [];
     return {
       jobId: command.jobId,
       jobNumber: command.jobNumber,
-      status: typeof job.status === 'string' ? job.status.slice(0,50) : null,
-      executions: (Array.isArray(job.executions)?job.executions:[]).slice(0,4).map(e=>({
-        index:Number.isSafeInteger(e.index)?e.index:null,
-        steps:(Array.isArray(e.steps)?e.steps:[]).slice(0,60).map(step=>({
-          name:typeof step.name==='string'?step.name.slice(0,110):'',
-          type:typeof step.type==='string'?step.type.slice(0,40):'',
-          status:typeof step.status==='string'?step.status.slice(0,50):'',
-          outcome:typeof step.outcome==='string'?step.outcome.slice(0,50):undefined,
-          exitCode:Number.isSafeInteger(step.exit_code)?step.exit_code:null,
-        })),
-      })),
+      status: typeof attrs.status === 'string' ? attrs.status.slice(0,50) :
+        typeof attrs.outcome === 'string' ? attrs.outcome.slice(0,50) : null,
+      attributeKeys: Object.keys(attrs).filter(k=>['name','type','phase','outcome','parallel_executions','executions','steps','started_at','ended_at'].includes(k)),
+      executions: (Array.isArray(rawExecutions)?rawExecutions:[]).slice(0,4).map(entry=>{
+        const e = isPlainObject(entry?.attributes) ? entry.attributes : entry;
+        return {
+          index:Number.isSafeInteger(e.index)?e.index:null,
+          steps:(Array.isArray(e.steps)?e.steps:[]).slice(0,60).map(original=>{
+            const step = isPlainObject(original?.attributes) ? original.attributes : original;
+            return {
+              name:typeof step.name==='string'?step.name.slice(0,110):'',
+              type:typeof step.type==='string'?step.type.slice(0,40):'',
+              status:typeof step.status==='string'?step.status.slice(0,50):'',
+              outcome:typeof step.outcome==='string'?step.outcome.slice(0,50):undefined,
+              exitCode:Number.isSafeInteger(step.exit_code)?step.exit_code:null,
+              stepNumber:Number.isSafeInteger(step.num)?step.num:null,
+            };
+          }),
+        };
+      }),
     };
   }
   if (command.action === 'job') {
