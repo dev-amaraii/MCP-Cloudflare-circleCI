@@ -151,3 +151,18 @@ test('read-only recent pipeline query requires allowed branch and preserves proj
   assert.throws(()=>validateCommand(command('recent',{branch:'main'}),id,now),/Branch not permitted/);
   assert.throws(()=>validateCommand(command('recent',{branch:'feat/storefront-demo',mode:'preview_qa'}),id,now),/Recent command has unexpected fields/);
 });
+
+test('unauthenticated egress probe never sends the CircleCI bearer token',async()=>{
+ const checked=validateCommand(command('probe'),id,now);
+ const outgoing=[];
+ const result=await executeCommand({CIRCLE_TOKEN:'must-not-leak'},checked.command,checked.project,async(url,init)=>{
+  outgoing.push({url,init});
+  return new Response('',{status:url.includes('circleci.com')?401:200});
+ });
+ assert.equal(outgoing.length,2);
+ assert.deepEqual(result.checks.map(x=>x.httpStatus),[401,200]);
+ for(const request of outgoing){
+  assert.equal(request.init.headers['Circle-Token'],undefined);
+  assert.equal(request.init.redirect,'manual');
+ }
+});
