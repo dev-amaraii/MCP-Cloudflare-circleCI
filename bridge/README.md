@@ -2,7 +2,7 @@
 
 The **separate, minimal** NEN CI bridge runs CircleCI requests without a user's Mac or a remote MCP connection. It is **not** the former `nen-circleci-mcp`: this project lives under `bridge/`, uses no MCP dependency, and does not modify the old server or its Cloudflare Worker.
 
-**Status:** restricted source implementation; not live until Worker and CircleCI secret provisioning are verified.
+**Status (2026-10-20):** `nen-ci-bridge` Worker deployed; KV binding, private subdomain settings and 1-minute Cron Trigger verified. A live authenticated Cloudflare control-plane **health request passed** end-to-end (KV request -> scheduled Worker -> KV result). `CIRCLE_TOKEN` is **not configured**, so the CircleCI API integration is not yet validated and **no pipeline has been triggered**.
 
 ## Why a KV mailbox
 
@@ -84,3 +84,15 @@ Use the already connected Cloudflare API tool, not a public Worker URL:
 - Prefixes `claims/` and `results/` are Worker-owned and must not be written by callers.
 
 Jayson Tech CI source is `dev-amaraii/projects-ext-jayson-online-shop`, `feat/storefront-demo`. That pipeline includes unit/type tests, the Pages production build, QA Intel and responsive browser checks. Hosting of a new version stays manually approved until an independently gated release path is developed.
+
+## Verified deployment evidence (2026-10-20)
+
+- Cloudflare account: NEN DevOps; Worker script `nen-ci-bridge` (separate from frozen `nen-circleci-mcp`).
+- KV namespace: `NEN_CI_BRIDGE_QUEUE_V1` / `3ad53b33be4346a0b6cf1e1d3047ede4`.
+- Script uploaded using Cloudflare Workers API and updated to enforce pipeline project identity on inspection.
+- GET Worker settings verified the `QUEUE` binding and no secrets. GET Worker subdomain verified `enabled:false`, `previews_enabled:false`.
+- Cron configured: `* * * * *`; first observed health completion `2026-10-20T12:26:53.826Z`.
+- Health request ID: `c1b0b693-53e3-4d7d-b4eb-11e73d0a1b88`. The returned `status:success` confirms mailbox execution and `tokenConfigured:false`. No request to CircleCI was made.
+- Ten unit contract cases successfully exercised inside an isolated JS harness with mocked fetch/KV/Response (the exact committed Node test command has **not** been executed yet).
+
+**Next gate:** operator creates and binds the encrypted `CIRCLE_TOKEN` secret using the Cloudflare Dashboard; run a fresh `health` request and require `tokenConfigured:true`, then test one explicitly authorized `preview_qa` trigger. Read-only workflow/status inspection must subsequently report the actual completed outcome.
