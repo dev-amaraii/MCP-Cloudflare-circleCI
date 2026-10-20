@@ -292,3 +292,19 @@ test('v3 job steps require verified pipeline ownership and redact output',async(
   throw Error('must not request job steps');
  }),/Pipeline project mismatch/);
 });
+
+test('v3 wrapped data.attributes and nested step attributes are decoded safely',async()=>{
+ const jobId='e2d2108c-b482-4a9f-afeb-60863cccd707';
+ const validated=validateCommand(command('job_steps',{jobId,jobNumber:11,pipelineId}),id,now);
+ const result=await executeCommand({CIRCLE_TOKEN:'private'},validated.command,validated.project,async(url)=>{
+  if(url.endsWith('/pipeline/'+pipelineId)) return Response.json({project_slug:PROJECTS['jayson-storefront'].slug});
+  if(url.endsWith('/pipeline/'+pipelineId+'/workflow')) return Response.json({items:[{id}]});
+  if(url.endsWith('/workflow/'+id+'/job')) return Response.json({items:[{id:jobId,job_number:11,project_slug:PROJECTS['jayson-storefront'].slug}]});
+  if(url.endsWith('/api/v3/jobs/'+jobId)) return Response.json({data:{id:jobId,attributes:{outcome:'failed',parallel_executions:[{attributes:{index:0,steps:[{attributes:{num:4,name:'Verify approved revision',outcome:'failed',exit_code:1}}]}}]}}});
+  return new Response('missing',{status:404});
+ });
+ assert.equal(result.status,'failed');
+ assert.equal(result.executions[0].steps[0].name,'Verify approved revision');
+ assert.equal(result.executions[0].steps[0].exitCode,1);
+ assert.equal(result.executions[0].steps[0].stepNumber,4);
+});
