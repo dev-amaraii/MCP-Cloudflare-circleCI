@@ -38,7 +38,7 @@ function hasOnlyKeys(value, keys) {
 
 export function validateCommand(command, keyId, now = Date.now()) {
   if (!isPlainObject(command) ||
-      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','commitSha','pipelineId','startNumber','requestedAt','approved'])) {
+      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','commitSha','pipelineId','startNumber','jobNumber','requestedAt','approved'])) {
     throw new Error('Invalid command shape');
   }
   if (command.v !== 1 || command.id !== keyId || !UUID.test(command.id)) {
@@ -83,6 +83,12 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (command.action === 'recent') {
     if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Recent command has unexpected fields');
+    return { command, project };
+  }
+  if (command.action === 'job') {
+    if (!Number.isSafeInteger(command.jobNumber) || command.jobNumber < 1 || command.jobNumber > 999999) throw new Error('Invalid job number');
+    if (command.branch !== undefined || command.mode !== undefined || command.pipelineId !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined) throw new Error('Job inspection has unexpected fields');
     return { command, project };
   }
   if (command.action === 'inspect') {
@@ -207,6 +213,33 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         .map(p => ({ id: p.id, number: p.number, state: p.state, createdAt: p.created_at, revision: p.vcs?.revision, errors: (p.errors || []).slice(0,3).map(e=>({type:e.type})) })),
     };
   }
+  if (command.action === 'job') {
+    // Read-only diagnostics; never fetch job stdout/stderr or expose secrets.
+    const details = await circleRequest(env, '/project/' + project.slug + '/job/' + command.jobNumber, undefined, requestFn);
+    const returnedSlug = details.project?.slug || details.project_slug;
+    if (returnedSlug && returnedSlug !== project.slug) throw new Error('Job project mismatch');
+    const steps = Array.isArray(details.steps) ? details.steps.slice(0, 40).map(s => ({
+      name: String(s.name || '').slice(0, 110),
+      status: String(s.status || '').slice(0, 40),
+      actions: Array.isArray(s.actions) ? s.actions.slice(0, 3).map(a => ({
+        status: String(a.status || '').slice(0, 40),
+        exitCode: Number.isSafeInteger(a.exit_code) ? a.exit_code : null,
+      })) : [],
+    })) : [];
+    // A CircleCI v2 job details response can differ by VCS provider.
+    // Return only vetted metadata and field presence; never response bodies.
+    return {
+      project: command.project,
+      jobNumber: command.jobNumber,
+      name: details.name || null,
+      status: details.status || null,
+      startedAt: details.started_at || null,
+      stoppedAt: details.stopped_at || null,
+      detailKeys: Object.keys(details).filter(k => ['steps','contexts','project','project_slug','status','name','executor','workflows','latest_workflow','errors','duration','parallelism'].includes(k)),
+      steps,
+      contexts: Array.isArray(details.contexts) ? details.contexts.slice(0,5).map(c => ({name: typeof c?.name === 'string' ? c.name.slice(0,80) : null})) : undefined,
+    };
+  }
   if (command.action === 'inspect') {
     const pipeline = await circleRequest(env, '/pipeline/' + command.pipelineId, undefined, requestFn);
     if (pipeline.project_slug !== project.slug) throw new Error('Pipeline project mismatch');
@@ -284,7 +317,7 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       'Invalid or oversized command', 'CircleCI token not configured',
       'CircleCI response missing pipeline ID', 'Unsupported action',
       'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields', 'Audit command has unexpected fields', 'Invalid starting pipeline number',
-      'Invalid release revision', 'Release command has unexpected fields',
+      'Invalid release revision', 'Release command has unexpected fields', 'Invalid job number', 'Job inspection has unexpected fields', 'Job project mismatch',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
