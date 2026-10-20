@@ -2,7 +2,7 @@
 
 The **separate, minimal** NEN CI bridge runs CircleCI requests without a user's Mac or a remote MCP connection. It is **not** the former `nen-circleci-mcp`: this project lives under `bridge/`, uses no MCP dependency, and does not modify the old server or its Cloudflare Worker.
 
-**Status (2026-10-20):** `nen-ci-bridge` Worker deployed; KV binding, private subdomain settings and 1-minute Cron Trigger verified. A live authenticated Cloudflare control-plane **health request passed** end-to-end (KV request -> scheduled Worker -> KV result). `CIRCLE_TOKEN` is **not configured**, so the CircleCI API integration is not yet validated and **no pipeline has been triggered**.
+**Status (2026-10-20):** `nen-ci-bridge` Worker deployed and end-to-end CircleCI integration **verified**. The encrypted `CIRCLE_TOKEN` secret is active, private subdomains remain disabled, KV + minute cron process requests, and an explicitly authorized `preview_qa` run of Jayson Tech created CircleCI pipeline #8 and returned a successful QA Intel workflow and job. The live storefront preview has **not** been redeployed.
 
 ## Why a KV mailbox
 
@@ -95,4 +95,12 @@ Jayson Tech CI source is `dev-amaraii/projects-ext-jayson-online-shop`, `feat/st
 - Health request ID: `c1b0b693-53e3-4d7d-b4eb-11e73d0a1b88`. The returned `status:success` confirms mailbox execution and `tokenConfigured:false`. No request to CircleCI was made.
 - Ten unit contract cases successfully exercised inside an isolated JS harness with mocked fetch/KV/Response (the exact committed Node test command has **not** been executed yet).
 
-**Next gate:** operator creates and binds the encrypted `CIRCLE_TOKEN` secret using the Cloudflare Dashboard; run a fresh `health` request and require `tokenConfigured:true`, then test one explicitly authorized `preview_qa` trigger. Read-only workflow/status inspection must subsequently report the actual completed outcome.
+**Verified:** after token creation, the secret was on an uploaded Worker version that was not yet deployed. Activating that version resolved `tokenConfigured:false`. An initial CircleCI trigger with `redirect:'error'` failed with a transport error. We did not retry until the numbered-pipeline audit confirmed #6 and #7 existed and #8 did not. Replacing redirect rejection with `redirect:'manual'` enabled safe read-only CircleCI API access. One new authorized `preview_qa` trigger then created pipeline **#8**, which passed. Pipeline ID: `69ae77a7-cd37-486b-a671-45c73efa2637`; workflow `91afe355-5356-4d3b-9b13-07d9542d6ff4`; job #8 status **success**. Build/test/QA Intel and 320/390/1280px responsive screenshots were archived. No deployment request was issued.
+
+## CI bridge launch — operational findings
+
+- The Cloudflare dashboard secret is **versioned**. After editing a Worker secret, verify that the version with the secret is active in the `/deployments` API. `GET /secrets` alone does not prove an active Cron invocation sees the secret.
+- Outbound HTTP with `redirect:'error'` can result in an uninformative transport failure. Use `redirect:'manual'` and reject non-2xx responses, without forwarding bearer tokens to redirected destinations.
+- A failed trigger is not proof that a pipeline was not created. Before retrying, use the read-only `audit` command with a known pipeline number; CircleCI's pipeline number endpoint verifies which numbers exist. This prevented a duplicate request during first integration.
+- `health`, `recent`, `audit`, `probe`, `trigger` and `inspect` are implemented for the registered project. `recent` can yield an empty filtered collection for GitHub App projects; prefer `audit` or a known `inspect` UUID for reliable verification.
+- First successful remote trigger: CircleCI [pipeline #8](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL/8) on 2026-10-20; job success and QA artifacts verified from CircleCI API via the Worker. It is **not** permission to automatically deploy production or preview.
