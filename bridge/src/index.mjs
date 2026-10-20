@@ -9,6 +9,7 @@
 const API = 'https://circleci.com/api/v2';
 const PREFIX = 'requests/';
 const RESULT_PREFIX = 'results/';
+const CLAIM_PREFIX = 'claims/';
 const RESULT_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_REQUEST_AGE_MS = 30 * 60 * 1000;
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
@@ -145,12 +146,13 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
 
   const id = item.name.slice(PREFIX.length);
   const resultKey = RESULT_PREFIX + id;
+  const claimKey = CLAIM_PREFIX + id;
   if (!UUID.test(id)) {
     await env.QUEUE.delete(item.name);
     return { rejected: 'malformed-key' };
   }
 
-  const prior = await env.QUEUE.get(resultKey);
+  const prior = await env.QUEUE.get(resultKey) || await env.QUEUE.get(claimKey);
   if (prior) {
     await env.QUEUE.delete(item.name);
     return { skipped: true, id };
@@ -163,7 +165,8 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
     if (!raw || raw.length > 4096) throw new Error('Invalid or oversized command');
     command = JSON.parse(raw);
     const validated = validateCommand(command, id, now);
-    await env.QUEUE.put(resultKey, JSON.stringify({ id, status:'claimed', action:command.action, updatedAt:timestamp }), { expirationTtl: RESULT_TTL_SECONDS });
+    // A distinct claim key avoids KV's one-write-per-second per-key limit.
+    await env.QUEUE.put(claimKey, JSON.stringify({ id, status:'claimed', action:command.action, updatedAt:timestamp }), { expirationTtl: RESULT_TTL_SECONDS });
     await env.QUEUE.delete(item.name);
     const outcome = await executeCommand(env, command, validated.project, requestFn);
     const result = { id, status:'success', action:command.action, updatedAt:new Date().toISOString(), outcome };
