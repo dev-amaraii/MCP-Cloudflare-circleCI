@@ -35,7 +35,7 @@ function hasOnlyKeys(value, keys) {
 
 export function validateCommand(command, keyId, now = Date.now()) {
   if (!isPlainObject(command) ||
-      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','pipelineId','requestedAt','approved'])) {
+      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','pipelineId','startNumber','requestedAt','approved'])) {
     throw new Error('Invalid command shape');
   }
   if (command.v !== 1 || command.id !== keyId || !UUID.test(command.id)) {
@@ -58,6 +58,11 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) throw new Error('Pipeline mode not permitted');
     if (command.pipelineId !== undefined) throw new Error('Trigger does not accept pipelineId');
+    return { command, project };
+  }
+  if (command.action === 'audit') {
+    if (!Number.isSafeInteger(command.startNumber) || command.startNumber < 1 || command.startNumber > 999999) throw new Error('Invalid starting pipeline number');
+    if (command.branch !== undefined || command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Audit command has unexpected fields');
     return { command, project };
   }
   if (command.action === 'probe') {
@@ -140,6 +145,24 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
       }
     }
     return { checks };
+  }
+  if (command.action === 'audit') {
+    const checked = [];
+    for (let number = command.startNumber; number < command.startNumber + 5; number++) {
+      let pipeline;
+      try {
+        pipeline = await circleRequest(env, '/project/' + project.slug + '/pipeline/' + number, undefined, requestFn);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'CircleCI API HTTP 404') {
+          checked.push({ number, found: false });
+          break;
+        }
+        throw error;
+      }
+      if (pipeline.project_slug !== project.slug) throw new Error('Pipeline project mismatch');
+      checked.push({ number, found: true, id: pipeline.id, state: pipeline.state, branch: pipeline.vcs?.branch, createdAt: pipeline.created_at });
+    }
+    return { project: command.project, checked };
   }
   if (command.action === 'recent') {
     const recent = await circleRequest(env, '/project/' + project.slug + '/pipeline?branch=' + encodeURIComponent(command.branch), undefined, requestFn);
@@ -225,7 +248,7 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
       'Invalid or oversized command', 'CircleCI token not configured',
       'CircleCI response missing pipeline ID', 'Unsupported action',
-      'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields',
+      'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields', 'Audit command has unexpected fields', 'Invalid starting pipeline number',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
