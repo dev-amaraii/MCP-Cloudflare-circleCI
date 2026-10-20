@@ -218,6 +218,27 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     const details = await circleRequest(env, '/project/' + project.slug + '/job/' + command.jobNumber, undefined, requestFn);
     const returnedSlug = details.project?.slug || details.project_slug;
     if (returnedSlug && returnedSlug !== project.slug) throw new Error('Job project mismatch');
+    // New CircleCI job endpoint provides executions[].steps[] without
+    // requiring access to raw terminal output or presigned log URLs.
+    let executions = [];
+    let stepMetadataUnavailable = false;
+    if (typeof details.id === 'string' && UUID.test(details.id)) {
+      try {
+        const modern = await circleRequest(env, '/jobs/' + details.id, undefined, requestFn);
+        if (modern.id !== details.id) throw new Error('Job identity mismatch');
+        executions = (Array.isArray(modern.executions) ? modern.executions : []).slice(0, 4)
+          .map(execution => ({
+            index: Number.isSafeInteger(execution.index) ? execution.index : null,
+            steps: (Array.isArray(execution.steps) ? execution.steps : []).slice(0, 50)
+              .map(step => ({
+                name: typeof step.name === 'string' ? step.name.slice(0, 120) : '',
+                type: typeof step.type === 'string' ? step.type.slice(0, 40) : '',
+                status: typeof step.status === 'string' ? step.status.slice(0, 40) : '',
+                exitCode: Number.isSafeInteger(step.exit_code) ? step.exit_code : null,
+              })),
+          }));
+      } catch (e) { stepMetadataUnavailable = true; }
+    } else { stepMetadataUnavailable = true; }
     const steps = Array.isArray(details.steps) ? details.steps.slice(0, 40).map(s => ({
       name: String(s.name || '').slice(0, 110),
       status: String(s.status || '').slice(0, 40),
@@ -237,6 +258,8 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
       stoppedAt: details.stopped_at || null,
       detailKeys: Object.keys(details).filter(k => ['steps','contexts','project','project_slug','status','name','executor','workflows','latest_workflow','errors','duration','parallelism'].includes(k)),
       steps,
+      executions,
+      stepMetadataUnavailable,
       contexts: Array.isArray(details.contexts) ? details.contexts.slice(0,5).map(c => ({name: typeof c?.name === 'string' ? c.name.slice(0,80) : null})) : undefined,
     };
   }
