@@ -3,8 +3,9 @@
  * Only Cloudflare-account-authorized clients can enqueue requests through
  * the KV control-plane API. Cron consumes at most one request per minute.
  *
- * There is deliberately no deployment, cancellation, rerun or arbitrary URL
- * functionality. Only pre-registered project/branch and pipeline parameters.
+ * No direct deployment, cancellation, rerun or arbitrary URL functionality.
+ * Approved release requests only trigger a separate SHA-pinned CircleCI
+ * workflow; QA completion gates the dedicated Pages deployment job.
  */
 const API = 'https://circleci.com/api/v2';
 const PREFIX = 'requests/';
