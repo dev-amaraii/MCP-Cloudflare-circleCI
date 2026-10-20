@@ -13,12 +13,14 @@ const CLAIM_PREFIX = 'claims/';
 const RESULT_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_REQUEST_AGE_MS = 30 * 60 * 1000;
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
+const COMMIT_SHA = /^[a-f0-9]{40}$/;
 
 export const PROJECTS = Object.freeze({
   'jayson-storefront': Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL',
     definitionId: 'b5a41026-8298-4976-956b-49fbca6de695',
     branches: ['feat/storefront-demo'],
+    releaseParameter: 'run_preview_release',
     modes: Object.freeze({
       validation: 'run_validation',
       preview_qa: 'run_preview_qa',
@@ -35,7 +37,7 @@ function hasOnlyKeys(value, keys) {
 
 export function validateCommand(command, keyId, now = Date.now()) {
   if (!isPlainObject(command) ||
-      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','pipelineId','startNumber','requestedAt','approved'])) {
+      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','commitSha','pipelineId','startNumber','requestedAt','approved'])) {
     throw new Error('Invalid command shape');
   }
   if (command.v !== 1 || command.id !== keyId || !UUID.test(command.id)) {
@@ -58,6 +60,14 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) throw new Error('Pipeline mode not permitted');
     if (command.pipelineId !== undefined) throw new Error('Trigger does not accept pipelineId');
+    return { command, project };
+  }
+  if (command.action === 'release') {
+    if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
+    if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha)) throw new Error('Invalid release revision');
+    if (command.mode !== undefined || command.pipelineId !== undefined || command.startNumber !== undefined) {
+      throw new Error('Release command has unexpected fields');
+    }
     return { command, project };
   }
   if (command.action === 'audit') {
@@ -121,6 +131,30 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     const data = await circleRequest(env, '/project/' + project.slug + '/pipeline/run', body, requestFn);
     if (!UUID.test(data.id || '')) throw new Error('CircleCI response missing pipeline ID');
     return { pipelineId: data.id, number: data.number ?? null, state: data.state ?? null, branch: command.branch, mode: command.mode };
+  }
+  if (command.action === 'release') {
+    // A separate explicitly approved command: standard trigger cannot deploy.
+    // CircleCI must gate deployment behind an independent QA job and enforce
+    // an exact Git SHA before a Pages release job can receive its scoped token.
+    const body = {
+      definition_id: project.definitionId,
+      config: { branch: command.branch },
+      checkout: { branch: command.branch },
+      parameters: {
+        [project.releaseParameter]: true,
+        release_sha: command.commitSha,
+      },
+    };
+    const data = await circleRequest(env, '/project/' + project.slug + '/pipeline/run', body, requestFn);
+    if (!UUID.test(data.id || '')) throw new Error('CircleCI response missing pipeline ID');
+    return {
+      pipelineId: data.id,
+      number: data.number ?? null,
+      state: data.state ?? null,
+      branch: command.branch,
+      revision: command.commitSha,
+      mode: 'preview_release',
+    };
   }
   if (command.action === 'probe') {
     // Public, unauthenticated egress checks. Never attach a CircleCI token.
@@ -249,6 +283,7 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       'Invalid or oversized command', 'CircleCI token not configured',
       'CircleCI response missing pipeline ID', 'Unsupported action',
       'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields', 'Audit command has unexpected fields', 'Invalid starting pipeline number',
+      'Invalid release revision', 'Release command has unexpected fields',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
