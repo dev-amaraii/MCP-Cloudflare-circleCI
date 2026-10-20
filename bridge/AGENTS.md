@@ -1,0 +1,12 @@
+# Agents — NEN private CircleCI/Cloudflare bridge
+
+**NEN International business context**. Canonical operator contract: [OPERATIONS.md](OPERATIONS.md). Read it and [`src/index.mjs`](src/index.mjs) before touching Cloudflare, CircleCI or KV. This is the private `nen-ci-bridge` (Cloudflare KV/Cron); **not** the legacy experimental `nen-circleci-mcp` OAuth server. Never assume the GitHub branch equals the active Worker without comparing deployment/version and source.
+
+- Source should be updated in GitHub before any reviewed Worker rollout. As of 20 October 2026 deployed source was mirrored at commit `a642430e` on `feat/nen-ci-kv-bridge`; the mirror was not separately revalidated by bridge CI. Verify current versions and tests before further modifications.
+- Production Worker is **not a public HTTP API**. `fetch` returns 404. Use account-authorized Cloudflare `QUEUE` binding/KV only; 1-minute Cron, one queued request per tick, UUID key and `approved:true` required. `approved:true` is not authentication; Cloudflare connection permissions are.
+- AmaraiiOS scope: project key `amaraii-os` → CircleCI `run_validation` only, branches pilot/development/staging. **Reject release for AmaraiiOS.** Jayson Storefront's separately gated preview release must remain intact and never become generally deployable.
+- Do not expose, copy, rotate or replace the `CIRCLE_TOKEN` secret value. Worker version uploads must preserve `CIRCLE_TOKEN` secret_text and `QUEUE` kv_namespace, then verify staged bindings **before explicit deployment**.
+- Never add arbitrary URLs, shell commands, a GET/POST public trigger, unauthenticated endpoints or unrestricted CircleCI parameter forwarding. Keep redirects manual, fail closed, and return only sanitized failures, never raw stdout or secrets.
+- Audit an uncertain CircleCI trigger via read-only `audit`/`inspect`, not a blind retry. Workers KV provides best-effort claims, not exactly-once processing; keep per-run credits deliberate.
+- After any source change run committed Node tests and TypeScript/build checks relevant to the bridge in a safe cloud runner; never claim code validated simply because the old Worker deployment passed. Do not deploy a new Worker or run a paid pipeline unless authorized.
+- Record source SHA, active Worker version, binding names/types, request ID, pipeline/job IDs, evidence and blockers in [NEN Context OS standard](https://app.notion.com/p/3fffa5e3c90581ceab86f62e1b1fb5a5). Never include credentials or customer data.
