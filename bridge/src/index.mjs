@@ -60,6 +60,10 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (command.pipelineId !== undefined) throw new Error('Trigger does not accept pipelineId');
     return { command, project };
   }
+  if (command.action === 'probe') {
+    if (command.branch !== undefined || command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Probe command has unexpected fields');
+    return { command, project };
+  }
   if (command.action === 'recent') {
     if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Recent command has unexpected fields');
@@ -79,7 +83,7 @@ async function circleRequest(env, path, body, requestFn = fetch) {
   }
   const res = await requestFn(API + path, {
     method: body ? 'POST' : 'GET',
-    redirect: 'error',
+    redirect: 'manual',
     headers: {
       'Circle-Token': env.CIRCLE_TOKEN,
       'Accept': 'application/json',
@@ -112,6 +116,30 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     const data = await circleRequest(env, '/project/' + project.slug + '/pipeline/run', body, requestFn);
     if (!UUID.test(data.id || '')) throw new Error('CircleCI response missing pipeline ID');
     return { pipelineId: data.id, number: data.number ?? null, state: data.state ?? null, branch: command.branch, mode: command.mode };
+  }
+  if (command.action === 'probe') {
+    // Public, unauthenticated egress checks. Never attach a CircleCI token.
+    // Redirects are not followed so HTTP 3xx cannot leave the chosen host.
+    const targets = [
+      ['circleci', 'https://circleci.com/api/v2/user'],
+      ['github', 'https://api.github.com/'],
+    ];
+    const checks = [];
+    for (const [service, url] of targets) {
+      try {
+        const response = await requestFn(url, { method: 'GET', redirect: 'manual', headers: { Accept: 'application/json' } });
+        checks.push({ service, httpStatus: response.status });
+      } catch (error) {
+        const text = error instanceof Error ? error.message.toLowerCase() : '';
+        const category = text.includes('redirect') ? 'redirect_error'
+          : text.includes('network') || text.includes('fetch') ? 'fetch_error'
+          : text.includes('tls') || text.includes('certificate') ? 'tls_error'
+          : text.includes('host') || text.includes('dns') ? 'resolution_error'
+          : 'transport_error';
+        checks.push({ service, category });
+      }
+    }
+    return { checks };
   }
   if (command.action === 'recent') {
     const recent = await circleRequest(env, '/project/' + project.slug + '/pipeline?branch=' + encodeURIComponent(command.branch), undefined, requestFn);
@@ -197,7 +225,7 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
       'Invalid or oversized command', 'CircleCI token not configured',
       'CircleCI response missing pipeline ID', 'Unsupported action',
-      'Pipeline project mismatch', 'Recent command has unexpected fields',
+      'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
