@@ -250,3 +250,21 @@ test('scoped job diagnosis returns vetted fields but not logs or bearer tokens',
  assert.throws(()=>validateCommand(command('job',{jobNumber:0}),id,now),/Invalid job number/);
  assert.throws(()=>validateCommand(command('job',{jobNumber:11,mode:'preview_qa'}),id,now),/Job inspection has unexpected fields/);
 });
+
+test('job diagnosis reads modern step statuses without raw outputs or URLs', async()=>{
+ const id='33333333-4444-4555-8666-777777777777';
+ const checked=validateCommand(command('job',{jobNumber:11}), '11111111-2222-4333-8444-555555555555',now);
+ let count=0;
+ const result=await executeCommand({CIRCLE_TOKEN:'protected'},checked.command,checked.project,async(url)=>{
+  count++;
+  if(url.endsWith('/job/11')) return Response.json({id,project:{slug:PROJECTS['jayson-storefront'].slug},status:'failed'});
+  if(url.endsWith('/jobs/'+id)) return Response.json({id,executions:[{index:0,steps:[{name:'Verify artifact',status:'failed',type:'run',exit_code:1,output_url:'secret',command:'echo protected'}]}]});
+  return new Response('not found',{status:404});
+ });
+ assert.equal(count,2);
+ assert.equal(result.executions[0].steps[0].exitCode,1);
+ assert.equal(result.executions[0].steps[0].name,'Verify artifact');
+ assert.equal(result.stepMetadataUnavailable,false);
+ assert.equal(JSON.stringify(result).includes('secret'),false);
+ assert.equal(JSON.stringify(result).includes('echo protected'),false);
+});
