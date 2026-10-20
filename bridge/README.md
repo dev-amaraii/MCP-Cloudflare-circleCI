@@ -21,13 +21,13 @@ There is **no public command endpoint**. The Worker returns HTTP 404 from `fetch
 
 ## V1 scope
 
-Only one registered project, `jayson-storefront`, branch `feat/storefront-demo`, with two on-demand CircleCI pipeline modes:
+Only one registered project, `jayson-storefront`, branch `feat/storefront-demo`, with two on-demand CircleCI test pipeline modes:
 - `validation`: `run_validation=true`
 - `preview_qa`: `run_preview_qa=true`
 
 `inspect` is read-only and retrieves pipeline/workflow/jobs/artifact metadata for a caller-supplied UUID. `health` checks the setup without requiring the CircleCI token.
 
-**No deploy, cancellation, rerun, arbitrary project names, arbitrary CircleCI API URL, arbitrary branch, custom parameters, shell execution or public API** is implemented. Other NEN projects require explicit reviewed registry entries. Do not add an automatic on-push trigger.
+**The Worker never deploys directly.** A distinct `action:release` command requires explicit approval and an exact 40-character Git SHA. It requests a separate QA-gated CircleCI release workflow. There is no arbitrary project, branch, parameter, shell or public command API; do not add automatic on-push triggers.
 
 ### Command contract (queue values only)
 
@@ -63,7 +63,7 @@ An authorized connection writes the JSON as the value at `requests/<same UUID>` 
 - One request is processed per minute. The Worker records a claim **before** making an external call to reduce accidental duplicates; uncertain outcomes are **not auto-retried**. Workers KV is eventually consistent and does **not** provide exactly-once processing. Use a Durable Object later if strong coordination becomes necessary.
 - Token is only passed outbound in CircleCI's `Circle-Token` header. Worker reports HTTP status but never response bodies, stack traces, tokens or credentials on errors.
 - Workers KV, CircleCI project and artifact URLs are not intended for public distribution.
-- Triggering a CI workflow must be explicitly authorized. Releases/deployments remain an independent approval and validation gate.
+- Tests and releases must be separately approved. The `release` command requires `approved:true`, the approved branch and full SHA. CircleCI re-runs all QA on that exact revision and grants the release job its own restricted Cloudflare Pages secret only after success.
 
 ## Test and deployment
 
@@ -104,3 +104,30 @@ Jayson Tech CI source is `dev-amaraii/projects-ext-jayson-online-shop`, `feat/st
 - A failed trigger is not proof that a pipeline was not created. Before retrying, use the read-only `audit` command with a known pipeline number; CircleCI's pipeline number endpoint verifies which numbers exist. This prevented a duplicate request during first integration.
 - `health`, `recent`, `audit`, `probe`, `trigger` and `inspect` are implemented for the registered project. `recent` can yield an empty filtered collection for GitHub App projects; prefer `audit` or a known `inspect` UUID for reliable verification.
 - First successful remote trigger: CircleCI [pipeline #8](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL/8) on 2026-10-20; job success and QA artifacts verified from CircleCI API via the Worker. It is **not** permission to automatically deploy production or preview.
+
+## Approved remote Pages release (separate from QA-only triggers)
+
+The Worker does not deploy Cloudflare Pages itself. A fresh command with `action:release`, project `jayson-storefront`, branch `feat/storefront-demo`, `approved:true` and an exact lowercase 40-character `commitSha` requests CircleCI `run_preview_release=true` and `release_sha=<commitSha>`. The ordinary `action:trigger` cannot select this release workflow.
+
+The release workflow checks the pinned checkout SHA, re-runs build, unit/type checks, QA Intel and responsive browser tests, and passes the exact `apps/storefront/dist/pages` artifact by a CircleCI workspace to the gated `deploy-preview` job. Only that deployment job receives the Pages API secret, and it verifies the deployed SHA and live client preview after uploading. It does not enable real checkout or production orders.
+
+**One-time setup required:** Create CircleCI context `jayson-pages-preview`. Restrict it to the Jayson storefront project and authorized operators. Add encrypted variable `CLOUDFLARE_API_TOKEN` from a least-privilege Cloudflare API token with Pages Edit permission on the existing NEN DevOps account. The token is separate from the Worker's `CIRCLE_TOKEN`; do not paste either token into GitHub, KV or ChatGPT.
+
+Until this context is confirmed, do **not** submit a release trigger. QA-only triggers remain available and never deploy.
+
+Example of an explicitly approved KV command:
+
+```json
+{
+  "v": 1,
+  "id": "<fresh UUID>",
+  "action": "release",
+  "project": "jayson-storefront",
+  "branch": "feat/storefront-demo",
+  "commitSha": "<reviewed 40-character Git SHA>",
+  "requestedAt": "<current ISO timestamp>",
+  "approved": true
+}
+```
+
+After the release request, read its result via KV, inspect the CircleCI pipeline, verify that both `preview-qa` and `deploy-preview` succeeded, confirm the `verified.json` release artifact, and check the Cloudflare Pages deployment. On any failure, do not claim release success or blindly retry.
