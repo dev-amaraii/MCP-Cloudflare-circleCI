@@ -17,6 +17,12 @@ const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
 
 export const PROJECTS = Object.freeze({
+  'amaraii-os': Object.freeze({
+    slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw',
+    definitionId: 'c4c6aad9-03c1-4e9e-99ca-cd650deda730',
+    branches: ['codex/p2-live-billing-pilot', 'development', 'staging'],
+    modes: Object.freeze({validation: 'run_validation'}),
+  }),
   'jayson-storefront': Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL',
     definitionId: 'b5a41026-8298-4976-956b-49fbca6de695',
@@ -64,6 +70,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
     return { command, project };
   }
   if (command.action === 'release') {
+    if (!project.releaseParameter) throw new Error('Action not permitted');
     if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha)) throw new Error('Invalid release revision');
     if (command.mode !== undefined || command.pipelineId !== undefined || command.startNumber !== undefined) {
@@ -159,6 +166,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return { pipelineId: data.id, number: data.number ?? null, state: data.state ?? null, branch: command.branch, mode: command.mode };
   }
   if (command.action === 'release') {
+    if (!project.releaseParameter) throw new Error('Action not permitted');
     // A separate explicitly approved command: standard trigger cannot deploy.
     // CircleCI must gate deployment behind an independent QA job and enforce
     // an exact Git SHA before a Pages release job can receive its scoped token.
@@ -282,6 +290,11 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           revisionMismatch:raw.includes('revision mismatch') || raw.includes('Expected release SHA does not match'),
           missingArtifact:raw.includes('missing release artifact') || raw.includes('No such file or directory'),
           permissionDenied:raw.includes('permission denied') || raw.includes('Permission denied'),
+          typescriptErrors: command.project === 'amaraii-os'
+            ? (raw.match(/[^\r\n]*error TS[0-9]{4}:[^\r\n]*/g) || [])
+                .slice(0,16).map(line => line.replace(/\x1b\[[0-9;]*m/g,'')
+                  .replace(/sk_(?:live|test)_[A-Za-z0-9]+/g,'[REDACTED]').slice(0,240))
+            : [],
           outputAvailable:raw.length>0,
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
