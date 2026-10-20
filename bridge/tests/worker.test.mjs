@@ -166,3 +166,16 @@ test('unauthenticated egress probe never sends the CircleCI bearer token',async(
   assert.equal(request.init.redirect,'manual');
  }
 });
+
+test('numbered pipeline audit confirms existing runs and stops at first 404', async () => {
+ const checked=validateCommand(command('audit',{startNumber:6}),id,now);
+ const calls=[];
+ const response=await executeCommand({CIRCLE_TOKEN:'placeholder'},checked.command,checked.project,async(url,init)=>{
+  calls.push({url,init});
+  if(url.endsWith('/pipeline/6'))return Response.json({project_slug:PROJECTS['jayson-storefront'].slug,id:pipelineId,state:'created',vcs:{branch:'feat/storefront-demo'}});
+  return new Response('not found',{status:404});
+ });
+ assert.deepEqual(response.checked.map(x=>({number:x.number,found:x.found})),[{number:6,found:true},{number:7,found:false}]);
+ assert.equal(calls.length,2);
+ assert.throws(()=>validateCommand(command('audit',{startNumber:0}),id,now),/Invalid starting pipeline number/);
+});
