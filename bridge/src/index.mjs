@@ -38,7 +38,7 @@ function hasOnlyKeys(value, keys) {
 
 export function validateCommand(command, keyId, now = Date.now()) {
   if (!isPlainObject(command) ||
-      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','commitSha','pipelineId','startNumber','jobNumber','requestedAt','approved'])) {
+      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','commitSha','pipelineId','startNumber','jobNumber','jobId','requestedAt','approved'])) {
     throw new Error('Invalid command shape');
   }
   if (command.v !== 1 || command.id !== keyId || !UUID.test(command.id)) {
@@ -85,6 +85,15 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Recent command has unexpected fields');
     return { command, project };
   }
+  if (command.action === 'job_steps') {
+    if (!Number.isSafeInteger(command.jobNumber) || command.jobNumber < 1 || command.jobNumber > 999999) throw new Error('Invalid job number');
+    if (typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) throw new Error('Invalid job identity');
+    if (command.branch !== undefined || command.mode !== undefined || command.commitSha !== undefined || command.startNumber !== undefined) {
+      throw new Error('Job steps have unexpected fields');
+    }
+    return { command, project };
+  }
   if (command.action === 'job') {
     if (!Number.isSafeInteger(command.jobNumber) || command.jobNumber < 1 || command.jobNumber > 999999) throw new Error('Invalid job number');
     if (command.branch !== undefined || command.mode !== undefined || command.pipelineId !== undefined ||
@@ -114,6 +123,16 @@ async function circleRequest(env, path, body, requestFn = fetch) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!res.ok) throw new Error('CircleCI API HTTP ' + res.status);
+  return res.json();
+}
+
+async function circleV3Request(env, path, requestFn = fetch) {
+  if (!env.CIRCLE_TOKEN || typeof env.CIRCLE_TOKEN !== 'string') throw new Error('CircleCI token not configured');
+  const res = await requestFn('https://circleci.com/api/v3' + path, {
+    method:'GET', redirect:'manual',
+    headers:{ Authorization: 'Bearer ' + env.CIRCLE_TOKEN, Accept:'application/json' },
+  });
+  if (!res.ok) throw new Error('CircleCI v3 HTTP ' + res.status);
   return res.json();
 }
 
@@ -211,6 +230,38 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
       project: command.project, branch: command.branch,
       pipelines: (recent.items || []).filter(p => p.project_slug === project.slug && p.vcs?.branch === command.branch).slice(0, 10)
         .map(p => ({ id: p.id, number: p.number, state: p.state, createdAt: p.created_at, revision: p.vcs?.revision, errors: (p.errors || []).slice(0,3).map(e=>({type:e.type})) })),
+    };
+  }
+  if (command.action === 'job_steps') {
+    // Check both pipeline and workflow ownership before requesting v3 job data.
+    const pipeline = await circleRequest(env,'/pipeline/' + command.pipelineId,undefined,requestFn);
+    if (pipeline.project_slug !== project.slug) throw new Error('Pipeline project mismatch');
+    const flows = await circleRequest(env,'/pipeline/' + command.pipelineId + '/workflow',undefined,requestFn);
+    let found = false;
+    for (const flow of (flows.items || []).slice(0,8)) {
+      const workflowJobs = await circleRequest(env,'/workflow/' + flow.id + '/job',undefined,requestFn);
+      if ((workflowJobs.items || []).some(j => j.id === command.jobId &&
+          j.job_number === command.jobNumber && j.project_slug === project.slug)) {
+        found = true; break;
+      }
+    }
+    if (!found) throw new Error('Job does not belong to approved pipeline');
+    const job = await circleV3Request(env,'/jobs/' + command.jobId,requestFn);
+    if (job.id !== command.jobId) throw new Error('Job identity mismatch');
+    return {
+      jobId: command.jobId,
+      jobNumber: command.jobNumber,
+      status: typeof job.status === 'string' ? job.status.slice(0,50) : null,
+      executions: (Array.isArray(job.executions)?job.executions:[]).slice(0,4).map(e=>({
+        index:Number.isSafeInteger(e.index)?e.index:null,
+        steps:(Array.isArray(e.steps)?e.steps:[]).slice(0,60).map(step=>({
+          name:typeof step.name==='string'?step.name.slice(0,110):'',
+          type:typeof step.type==='string'?step.type.slice(0,40):'',
+          status:typeof step.status==='string'?step.status.slice(0,50):'',
+          outcome:typeof step.outcome==='string'?step.outcome.slice(0,50):undefined,
+          exitCode:Number.isSafeInteger(step.exit_code)?step.exit_code:null,
+        })),
+      })),
     };
   }
   if (command.action === 'job') {
@@ -341,11 +392,13 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       'CircleCI response missing pipeline ID', 'Unsupported action',
       'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields', 'Audit command has unexpected fields', 'Invalid starting pipeline number',
       'Invalid release revision', 'Release command has unexpected fields', 'Invalid job number', 'Job inspection has unexpected fields', 'Job project mismatch',
+      'Invalid job identity', 'Job steps have unexpected fields', 'Job does not belong to approved pipeline', 'Job identity mismatch',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
     const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof SyntaxError ? 'Invalid JSON response or command'
+      : /^CircleCI v3 HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof TypeError ? 'Network or API transport failure'
       : 'Bridge request failed';
     const result = { id, status:'error', action:command?.action ?? 'unknown', updatedAt:new Date().toISOString(), error };
