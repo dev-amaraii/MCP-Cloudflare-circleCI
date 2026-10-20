@@ -179,3 +179,50 @@ test('numbered pipeline audit confirms existing runs and stops at first 404', as
  assert.equal(calls.length,2);
  assert.throws(()=>validateCommand(command('audit',{startNumber:0}),id,now),/Invalid starting pipeline number/);
 });
+
+test('preview release requires explicit approval, allowed branch and exact full revision', () => {
+ const approved = command('release',{
+  branch: 'feat/storefront-demo',
+  commitSha: 'a'.repeat(40),
+ });
+ assert.ok(validateCommand(approved,id,now));
+ for(const c of [
+  {...approved,approved:false},
+  {...approved,branch:'main'},
+  {...approved,commitSha:'short'},
+  {...approved,commitSha:'A'.repeat(40)},
+  {...approved,mode:'preview_qa'},
+  {...approved,pipelineId},
+  {...approved,startNumber:2},
+  {...approved,action:'trigger'},
+ ]) assert.throws(()=>validateCommand(c,id,now));
+});
+
+test('explicit release calls only the approved CircleCI definition and QA-gated release parameters', async () => {
+ const approved = command('release',{
+  branch: 'feat/storefront-demo',
+  commitSha: 'a'.repeat(40),
+ });
+ const validated = validateCommand(approved,id,now);
+ const log = [];
+ const result = await executeCommand({CIRCLE_TOKEN:'placeholder-token'}, validated.command, validated.project, fakeFetch(log));
+ assert.equal(result.pipelineId,pipelineId);
+ assert.equal(result.mode,'preview_release');
+ assert.equal(result.revision,'a'.repeat(40));
+ assert.equal(log.length,1);
+ assert.equal(log[0].init.method,'POST');
+ assert.deepEqual(JSON.parse(log[0].init.body),{
+  definition_id:'b5a41026-8298-4976-956b-49fbca6de695',
+  config:{branch:'feat/storefront-demo'},
+  checkout:{branch:'feat/storefront-demo'},
+  parameters:{run_preview_release:true,release_sha:'a'.repeat(40)},
+ });
+});
+
+test('normal QA trigger cannot activate a release workflow', async () => {
+ const checked=validateCommand(command('trigger',{branch:'feat/storefront-demo',mode:'preview_qa'}),id,now);
+ const calls=[];
+ await executeCommand({CIRCLE_TOKEN:'placeholder-token'},checked.command,checked.project,fakeFetch(calls));
+ assert.deepEqual(JSON.parse(calls[0].init.body).parameters,{run_preview_qa:true});
+ assert.equal(JSON.stringify(calls[0].init.body).includes('run_preview_release'),false);
+});
