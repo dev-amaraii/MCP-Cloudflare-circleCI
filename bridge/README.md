@@ -139,3 +139,13 @@ After the release request, read its result via KV, inspect the CircleCI pipeline
 - Storefront branch HEAD at the time of verification: `5f0e853d509ac9a9fd21eb81ebd0e7fea703e412`.
 - Cloudflare Pages project `jayson-tech-client-preview` was rechecked: exactly one existing deployment, `d7b27f97-1cb0-4482-b6b7-8e864a6749ce`, still pointing to `8baf81754d54ea7fce238561dcaba68d7eebc02d`. The live site remains the earlier preview.
 - The separate `manually-requested-preview-release` workflow and the Pages credential have not been exercised. The one-time restricted CircleCI context `jayson-pages-preview` must be configured before requesting a release.
+
+## Preview release #10 — QA passed, deployment preflight blocked (2026-10-20)
+
+- An explicitly authorized `release` command pinned to storefront revision `5f0e853d509ac9a9fd21eb81ebd0e7fea703e412` created CircleCI pipeline **#10**, ID `92f527a8-8272-4b7c-9b73-33fdd69642f1`.
+- The `manually-requested-preview-release` workflow ran QA job **#10** successfully and attached the QA workspace artifact. Deployment job **#11** started with the `jayson-pages-preview` CircleCI context but **failed at the preflight step** `Verify approved revision, target and exact QA artifact`, exit code 1.
+- A scoped v3 CircleCI job-step diagnostic (`GET /api/v3/jobs/{id}`), authorized against this project/pipeline and validated without exposing logs, identified failed step **103**. Condensed stdout (`GET /api/v3/jobs/{id}/stdout/condensed`) was examined in the Worker only. It contained the explicit message `Cloudflare Pages token missing from restricted CircleCI context`; the Worker returned only boolean `missingDeploymentToken:true`.
+- **Confirmed root cause:** `CLOUDFLARE_API_TOKEN` was missing or empty in the deployment job environment, even though `jayson-pages-preview` was attached. This does not establish whether the user forgot to add it, mistyped its exact name, or misconfigured the context; review its Environment Variables.
+- Cloudflare Pages retained the prior deployment, id `d7b27f97-1cb0-4482-b6b7-8e864a6749ce`, commit `8baf81754d54ea7fce238561dcaba68d7eebc02d`. **No new preview was uploaded**.
+- **Operator action:** CircleCI → Organization Settings → Contexts → `jayson-pages-preview` → Environment Variables → ensure the exact case-sensitive `CLOUDFLARE_API_TOKEN` has a valid least-privilege Cloudflare API token with Pages Edit permission for NEN DevOps. Never share the token in chat, GitHub, or KV.
+- **No automatic retry.** Once the operator confirms the secret is accessible, submit a *fresh*, separately approved release for the still-current storefront commit (verify branch HEAD again), and inspect both jobs plus the actual Pages deployment and post-deployment verification artifact.
