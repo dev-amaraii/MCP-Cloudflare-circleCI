@@ -2,7 +2,7 @@
 
 The **separate, minimal** NEN CI bridge runs CircleCI requests without a user's Mac or a remote MCP connection. It is **not** the former `nen-circleci-mcp`: this project lives under `bridge/`, uses no MCP dependency, and does not modify the old server or its Cloudflare Worker.
 
-**Status (2026-10-20):** `nen-ci-bridge` Worker deployed and end-to-end CircleCI integration **verified**. The encrypted `CIRCLE_TOKEN` secret is active, private subdomains remain disabled, KV + minute cron process requests, and an explicitly authorized `preview_qa` run of Jayson Tech created CircleCI pipeline #8 and returned a successful QA Intel workflow and job. The live storefront preview has **not** been redeployed.
+**Current status (2026-10-20):** `nen-ci-bridge` is deployed and the encrypted `CIRCLE_TOKEN` and KV bindings/Cron are confirmed active. **Jayson Tech** passed a separate QA-gated client-only Pages preview release in [pipeline #11](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL/11). **AmaraiiOS** is now allowlisted for **validation only**: [pipeline #4](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw/4) and later [pipeline #5](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw/5) validated code without GitHub Actions, local Mac, billing or deployment. The deployed Worker source was synced to this branch at `a642430e`, but its mirror has not independently passed new bridge-source CI. **Read [OPERATIONS.md](OPERATIONS.md) and [AGENTS.md](AGENTS.md) first**; historical checkpoints below may be superseded.
 
 ## Why a KV mailbox
 
@@ -21,9 +21,9 @@ There is **no public command endpoint**. The Worker returns HTTP 404 from `fetch
 
 ## V1 scope
 
-Only one registered project, `jayson-storefront`, branch `feat/storefront-demo`, with two on-demand CircleCI test pipeline modes:
-- `validation`: `run_validation=true`
-- `preview_qa`: `run_preview_qa=true`
+Two project identities are pinned in `src/index.mjs` (no dynamic project or parameter selection):
+- `jayson-storefront`, branch `feat/storefront-demo`: `validation`, `preview_qa`, plus separately authorized exact-SHA QA-gated preview `release`.
+- `amaraii-os`, branches `codex/p2-live-billing-pilot`, `development`, `staging`: **only** `validation` (`run_validation=true`); **release denied**.
 
 `inspect` is read-only and retrieves pipeline/workflow/jobs/artifact metadata for a caller-supplied UUID. `health` checks the setup without requiring the CircleCI token.
 
