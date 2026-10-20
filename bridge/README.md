@@ -131,3 +131,11 @@ Example of an explicitly approved KV command:
 ```
 
 After the release request, read its result via KV, inspect the CircleCI pipeline, verify that both `preview-qa` and `deploy-preview` succeeded, confirm the `verified.json` release artifact, and check the Cloudflare Pages deployment. On any failure, do not claim release success or blindly retry.
+
+## QA-only regression verification after release workflow changes — 2026-10-20
+
+- ChatGPT issued exactly one on-demand `action:trigger` with `mode:preview_qa` after the new release workflow was committed.
+- CircleCI pipeline **#9**, ID `74d1b6df-f1ac-4cc6-b64e-1ee383616e43`, completed with successful `manually-requested-preview-qa` workflow and `preview-qa` job #9. QA artifacts were uploaded. No deploy job was started.
+- Storefront branch HEAD at the time of verification: `5f0e853d509ac9a9fd21eb81ebd0e7fea703e412`.
+- Cloudflare Pages project `jayson-tech-client-preview` was rechecked: exactly one existing deployment, `d7b27f97-1cb0-4482-b6b7-8e864a6749ce`, still pointing to `8baf81754d54ea7fce238561dcaba68d7eebc02d`. The live site remains the earlier preview.
+- The separate `manually-requested-preview-release` workflow and the Pages credential have not been exercised. The one-time restricted CircleCI context `jayson-pages-preview` must be configured before requesting a release.
