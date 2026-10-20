@@ -301,10 +301,14 @@ test('v3 wrapped data.attributes and nested step attributes are decoded safely',
   if(url.endsWith('/pipeline/'+pipelineId+'/workflow')) return Response.json({items:[{id}]});
   if(url.endsWith('/workflow/'+id+'/job')) return Response.json({items:[{id:jobId,job_number:11,project_slug:PROJECTS['jayson-storefront'].slug}]});
   if(url.endsWith('/api/v3/jobs/'+jobId)) return Response.json({data:{id:jobId,attributes:{outcome:'failed',parallel_executions:[{attributes:{index:0,steps:[{attributes:{num:4,name:'Verify approved revision',outcome:'failed',exit_code:1}}]}}]}}});
+  if(url.includes('/stdout/condensed?')) return {ok:true,status:200,text:async()=> 'Cloudflare Pages token missing from restricted CircleCI context'};
   return new Response('missing',{status:404});
  });
  assert.equal(result.status,'failed');
  assert.equal(result.executions[0].steps[0].name,'Verify approved revision');
  assert.equal(result.executions[0].steps[0].exitCode,1);
  assert.equal(result.executions[0].steps[0].stepNumber,4);
+ assert.equal(result.failedStepDiagnostic.missingDeploymentToken,true);
+ assert.equal(result.failedStepDiagnostic.httpStatus,200);
+ assert.equal(JSON.stringify(result).includes('Cloudflare Pages token missing from restricted CircleCI context'),false);
 });
