@@ -22,6 +22,7 @@ function fakeFetch(log) {
   return async (url, init) => {
     log.push({url, init});
     if (url.endsWith('/pipeline/run')) return new Response(JSON.stringify({id:pipelineId,number:7,state:'pending'}), {status:201,headers:{'Content-Type':'application/json'}});
+    if (url.endsWith('/pipeline?branch=feat%2Fstorefront-demo')) return Response.json({items:[{id:pipelineId,number:7,state:'created',created_at:'2026-10-20T12:50:00Z',project_slug:PROJECTS['jayson-storefront'].slug,vcs:{branch:'feat/storefront-demo',revision:'abc'}}]});
     if (url.endsWith('/pipeline/' + pipelineId)) return Response.json({id:pipelineId,number:7,state:'created',project_slug:PROJECTS['jayson-storefront'].slug,vcs:{branch:'feat/storefront-demo',revision:'abc'}});
     if (url.endsWith('/pipeline/' + pipelineId + '/workflow')) return Response.json({items:[{id:id,name:'manually-requested-preview-qa',status:'success'}]});
     if (url.endsWith('/workflow/' + id + '/job')) return Response.json({items:[{id:'job1',name:'preview-qa',status:'success',job_number:12}]});
@@ -136,4 +137,17 @@ test('inspect rejects a pipeline outside the registered project before revealing
   return Response.json({id:pipelineId,project_slug:'circleci/other-project/different-repo',state:'created'});
  }),/Pipeline project mismatch/);
  assert.equal(calls,1);
+});
+
+test('read-only recent pipeline query requires allowed branch and preserves project isolation', async () => {
+  const recent=command('recent',{branch:'feat/storefront-demo'});
+  const checked=validateCommand(recent,id,now);
+  const log=[];
+  const result=await executeCommand({CIRCLE_TOKEN:'placeholder-token'},checked.command,checked.project,fakeFetch(log));
+  assert.equal(result.pipelines.length,1);
+  assert.equal(result.pipelines[0].id,pipelineId);
+  assert.equal(log.length,1);
+  assert.equal(log[0].init.method,'GET');
+  assert.throws(()=>validateCommand(command('recent',{branch:'main'}),id,now),/Branch not permitted/);
+  assert.throws(()=>validateCommand(command('recent',{branch:'feat/storefront-demo',mode:'preview_qa'}),id,now),/Recent command has unexpected fields/);
 });
