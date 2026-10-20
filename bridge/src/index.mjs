@@ -60,6 +60,11 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (command.pipelineId !== undefined) throw new Error('Trigger does not accept pipelineId');
     return { command, project };
   }
+  if (command.action === 'recent') {
+    if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
+    if (command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Recent command has unexpected fields');
+    return { command, project };
+  }
   if (command.action === 'inspect') {
     if (typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) throw new Error('Invalid pipelineId');
     if (command.branch !== undefined || command.mode !== undefined) throw new Error('Inspect has unexpected fields');
@@ -107,6 +112,14 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     const data = await circleRequest(env, '/project/' + project.slug + '/pipeline/run', body, requestFn);
     if (!UUID.test(data.id || '')) throw new Error('CircleCI response missing pipeline ID');
     return { pipelineId: data.id, number: data.number ?? null, state: data.state ?? null, branch: command.branch, mode: command.mode };
+  }
+  if (command.action === 'recent') {
+    const recent = await circleRequest(env, '/project/' + project.slug + '/pipeline?branch=' + encodeURIComponent(command.branch), undefined, requestFn);
+    return {
+      project: command.project, branch: command.branch,
+      pipelines: (recent.items || []).filter(p => p.project_slug === project.slug && p.vcs?.branch === command.branch).slice(0, 10)
+        .map(p => ({ id: p.id, number: p.number, state: p.state, createdAt: p.created_at, revision: p.vcs?.revision, errors: (p.errors || []).slice(0,3).map(e=>({type:e.type})) })),
+    };
   }
   if (command.action === 'inspect') {
     const pipeline = await circleRequest(env, '/pipeline/' + command.pipelineId, undefined, requestFn);
@@ -184,9 +197,14 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
       'Invalid or oversized command', 'CircleCI token not configured',
       'CircleCI response missing pipeline ID', 'Unsupported action',
-      'Pipeline project mismatch',
+      'Pipeline project mismatch', 'Recent command has unexpected fields',
     ];
-    const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ? message : 'Bridge request failed';
+    // Only expose typed failure categories: never emit raw upstream messages,
+    // tokens, request payloads, stack traces or URLs.
+    const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ? message
+      : err instanceof SyntaxError ? 'Invalid JSON response or command'
+      : err instanceof TypeError ? 'Network or API transport failure'
+      : 'Bridge request failed';
     const result = { id, status:'error', action:command?.action ?? 'unknown', updatedAt:new Date().toISOString(), error };
     await env.QUEUE.put(resultKey, JSON.stringify(result), { expirationTtl: RESULT_TTL_SECONDS });
     await env.QUEUE.delete(item.name);
