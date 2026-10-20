@@ -110,6 +110,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
   }
   if (command.action === 'inspect') {
     const pipeline = await circleRequest(env, '/pipeline/' + command.pipelineId, undefined, requestFn);
+    if (pipeline.project_slug !== project.slug) throw new Error('Pipeline project mismatch');
     const flowData = await circleRequest(env, '/pipeline/' + command.pipelineId + '/workflow', undefined, requestFn);
     const flows = [];
     for (const flow of (flowData.items || []).slice(0, 8)) {
@@ -183,6 +184,7 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
       'Invalid or oversized command', 'CircleCI token not configured',
       'CircleCI response missing pipeline ID', 'Unsupported action',
+      'Pipeline project mismatch',
     ];
     const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ? message : 'Bridge request failed';
     const result = { id, status:'error', action:command?.action ?? 'unknown', updatedAt:new Date().toISOString(), error };
