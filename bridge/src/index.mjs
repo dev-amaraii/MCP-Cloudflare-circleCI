@@ -252,9 +252,44 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     if (job?.id !== command.jobId) throw new Error('Job identity mismatch');
     const attrs = isPlainObject(job.attributes) ? job.attributes : job;
     const rawExecutions = attrs.parallel_executions ?? attrs.executions ?? job.executions ?? [];
+    const failedSteps = (Array.isArray(rawExecutions) ? rawExecutions : []).flatMap((entry, idx)=>{
+      const e=isPlainObject(entry?.attributes)?entry.attributes:entry;
+      const index=Number.isSafeInteger(e.index)?e.index:idx;
+      return (Array.isArray(e.steps)?e.steps:[]).map(original=>{
+        const step=isPlainObject(original?.attributes)?original.attributes:original;
+        return {index,step};
+      });
+    }).filter(x=>x.step?.outcome==='failed' || x.step?.exit_code>0);
+    let failedStepDiagnostic = null;
+    const failed = failedSteps.find(x=> Number.isSafeInteger(x.step?.num) &&
+      x.step.num >= 0 && x.step.num < 10000 && x.index >= 0 && x.index < 8);
+    if (failed) {
+      // Condensed stdout is examined in-worker only. Do not return raw
+      // untrusted console output, URLs, secrets or arbitrary messages.
+      try {
+        const u='https://circleci.com/api/v3/jobs/' + command.jobId +
+          '/stdout/condensed?filter%5Bexecution%5D=' + failed.index +
+          '&filter%5Bstep_num%5D=' + failed.step.num;
+        const out=await requestFn(u,{
+          method:'GET',redirect:'manual',
+          headers:{Authorization:'Bearer ' + env.CIRCLE_TOKEN,Accept:'text/plain'},
+        });
+        const raw=out.ok?(await out.text()).slice(0,50000):'';
+        failedStepDiagnostic={
+          stepNumber:failed.step.num,
+          httpStatus:out.status,
+          missingDeploymentToken:raw.includes('Cloudflare Pages token missing from restricted CircleCI context'),
+          revisionMismatch:raw.includes('revision mismatch') || raw.includes('Expected release SHA does not match'),
+          missingArtifact:raw.includes('missing release artifact') || raw.includes('No such file or directory'),
+          permissionDenied:raw.includes('permission denied') || raw.includes('Permission denied'),
+          outputAvailable:raw.length>0,
+        };
+      } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
+    }
     return {
       jobId: command.jobId,
       jobNumber: command.jobNumber,
+      failedStepDiagnostic,
       status: typeof attrs.status === 'string' ? attrs.status.slice(0,50) :
         typeof attrs.outcome === 'string' ? attrs.outcome.slice(0,50) : null,
       attributeKeys: Object.keys(attrs).filter(k=>['name','type','phase','outcome','parallel_executions','executions','steps','started_at','ended_at'].includes(k)),
