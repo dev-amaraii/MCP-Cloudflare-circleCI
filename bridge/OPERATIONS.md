@@ -7,7 +7,7 @@
 - Owner: **NEN International (NEN Context OS)**. Distinguish this project from the experimental `nen-circleci-mcp` (read-only OAuth/MCP, not the execution bridge).
 - Cloudflare Worker script: `nen-ci-bridge`, Workers `fetch` returns **404**; `workers.dev` and preview URLs disabled. **There is no public /trigger URL.**
 - Cloudflare account: NEN DevOps; identify its current `account_id` from the connected Cloudflare tool or account settings. Worker binding `QUEUE` points to Workers KV `NEN_CI_BRIDGE_QUEUE_V1` (current namespace ID in `wrangler.toml`). Worker binding `CIRCLE_TOKEN` is a **secret_text**; never read, export or write its value to Git, Notion, logs or chat.
-- Cron `* * * * *`, at most **one queued command per tick**. Request must have a fresh current ISO date (30-minute max age), v1, matching UUID ID/key, allowlisted project/action/branch and `approved:true`.
+- Proposed low-usage Cron `*/5 * * * *` (one tick per 5 minutes, at most **one queued command per tick**), **pending deployment**. Previously verified deployed Worker ran `* * * * *` and reached up to 1,440 idle KV list calls/day against the 1,000/day free limit. Do not claim the new Cron is live until its deployed schedules are inspected. Request must have a fresh current ISO date (30-minute max age), v1, matching UUID ID/key, allowlisted project/action/branch and `approved:true`.
 - Cloudflare control-plane operations using an authenticated NEN Cloudflare connection:
   - `GET /accounts/{account_id}/workers/scripts/nen-ci-bridge/settings` — verify bindings **names/types only**.
   - `GET /accounts/{account_id}/workers/scripts/nen-ci-bridge/deployments` — identify **active version**; secret existence on an inactive version is not proof.
