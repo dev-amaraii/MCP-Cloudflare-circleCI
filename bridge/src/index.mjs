@@ -1,7 +1,7 @@
 /**
  * NEN CI Bridge — private Cloudflare KV mailbox, no HTTP command endpoint.
  * Only Cloudflare-account-authorized clients can enqueue requests through
- * the KV control-plane API. Cron consumes at most one request per minute.
+ * the KV control-plane API. Configured Cron consumes at most one request per scheduled tick (normally every five minutes).
  *
  * No direct deployment, cancellation, rerun or arbitrary URL functionality.
  * Approved release requests only trigger a separate SHA-pinned CircleCI
