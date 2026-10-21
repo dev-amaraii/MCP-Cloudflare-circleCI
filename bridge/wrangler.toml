@@ -9,4 +9,6 @@ binding = "QUEUE"
 id = "3ad53b33be4346a0b6cf1e1d3047ede4"
 
 [triggers]
-crons = ["* * * * *"]
+# 5-minute polling bounds idle KV.list calls to 288/day, below the 1,000/day free-tier list allowance.
+# The GitHub App run-ci label trigger is the faster path for per-commit validation.
+crons = ["*/5 * * * *"]
