@@ -2,16 +2,26 @@
 
 The **separate, minimal** NEN CI bridge runs CircleCI requests without a user's Mac or a remote MCP connection. It is **not** the former `nen-circleci-mcp`: this project lives under `bridge/`, uses no MCP dependency, and does not modify the old server or its Cloudflare Worker.
 
-**Current status (2026-10-20):** `nen-ci-bridge` is deployed and the encrypted `CIRCLE_TOKEN` and KV bindings/Cron are confirmed active. **Jayson Tech** passed a separate QA-gated client-only Pages preview release in [pipeline #11](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL/11). **AmaraiiOS** is now allowlisted for **validation only**: [pipeline #4](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw/4) and later [pipeline #5](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw/5) validated code without GitHub Actions, local Mac, billing or deployment. The deployed Worker source was synced to this branch at `a642430e`, but its mirror has not independently passed new bridge-source CI. **Read [OPERATIONS.md](OPERATIONS.md) and [AGENTS.md](AGENTS.md) first**; historical checkpoints below may be superseded.
+## Current operator decision — 22 October 2026 (approved)
 
-## Why a KV mailbox
+**Native GitHub comes first.** For AmaraiiOS agent-driven validation, use the existing `run-ci` PR-label-added GitHub App trigger and inspect `ci/circleci: validate` on the **exact current PR head SHA** through the connected GitHub tools. CircleCI runs **on demand**; neither a Cloudflare mailbox nor repeated status polling is necessary for ordinary development. See [agent rules](AGENTS.md), [default operating steps](OPERATIONS.md), [NEN Context OS](https://app.notion.com/p/3fffa5e3c90581ceab86f62e1b1fb5a5) and [tracking issue #4](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/issues/4).
 
-ChatGPT has an authorized Cloudflare API connector but **cannot invoke arbitrary URL endpoints** using that connector. An authenticated assistant can write a request to Cloudflare KV via its API and later read a result, while the Worker handles CircleCI API calls on a one-minute Cron Trigger.
+**Live Cloudflare exception:** The existing private Worker is still required for legacy capabilities including Jayson Storefront's separately approved, exact-SHA, QA-gated client-preview release. On 22 October 2026 its Cron was updated **in production, schedule-only**, from every minute to `*/5 * * * *` (288 theoretical idle KV list calls/day instead of 1,440). Active Worker version remained `332c29dd-5363-4626-a18f-fb0575ae32da`. This does **not** remove polling; it is a temporary quota mitigation. Matching config is on [draft PR #3](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/3) pending merge. **Do not redeploy old mirrored Worker source, disable Cron or delete KV until all remaining consumers have a proven safe replacement.**
+
+**Architecture rule:** Do not preemptively build a new Cloudflare API, Queue, cache, general MCP bridge or background scheduler. Identify missing GitHub-native agent capabilities, prove the gap, then build only the minimum approved solution. Cloudflare Queues/API proposals from earlier investigations were superseded; Jayson privileged release authorization is a distinct requirement. A passing CircleCI source build is **not** hosted acceptance or release approval.
+
+---
+
+**Historical deployment evidence (2026-10-20):** `nen-ci-bridge` is deployed and the encrypted `CIRCLE_TOKEN` and KV bindings/Cron are confirmed active. **Jayson Tech** passed a separate QA-gated client-only Pages preview release in [pipeline #11](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL/11). **AmaraiiOS** is now allowlisted for **validation only**: [pipeline #4](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw/4) and later [pipeline #5](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw/5) validated code without GitHub Actions, local Mac, billing or deployment. The deployed Worker source was synced to this branch at `a642430e`, but its mirror has not independently passed new bridge-source CI. **Read [OPERATIONS.md](OPERATIONS.md) and [AGENTS.md](AGENTS.md) first**; historical checkpoints below may be superseded.
+
+## Why the legacy KV mailbox existed (fallback, not default CI)
+
+ChatGPT has an authorized Cloudflare API connector but **cannot invoke arbitrary URL endpoints** using that connector. An authenticated assistant can write a request to Cloudflare KV via its API and later read a result, while the legacy Worker handles CircleCI API calls on the currently deployed five-minute Cron Trigger.
 
 ```
 Authorized ChatGPT Cloudflare connection
   -> Cloudflare KV: requests/<uuid>
-  -> Cloudflare Worker scheduled() once per minute
+  -> Cloudflare Worker scheduled() every five minutes (temporary fallback)
   -> CircleCI v2 personal API token (encrypted Worker secret)
   -> Cloudflare KV: claims/<uuid>, results/<uuid>
   -> Authenticated ChatGPT Cloudflare connection reads result
@@ -46,21 +56,21 @@ Two project identities are pinned in `src/index.mjs` (no dynamic project or para
 
 For read-only inspection, use `"action":"inspect"` and `"pipelineId":"<UUID>"`, omitting `branch` and `mode`. For a no-token health check, use `"action":"health"`, omitting `branch`, `mode` and `pipelineId`. Requests expire after 30 minutes, must contain the fixed version and UUID, and require `approved:true`.
 
-An authorized connection writes the JSON as the value at `requests/<same UUID>` in the single `NEN_CI_BRIDGE_QUEUE_V1` namespace with `expiration_ttl:900`. The Worker writes a result at `results/<UUID>` (and a one-time claim at `claims/<UUID>`) with a 7-day TTL. The result contains either `status:success,outcome` or `status:error,error`.
+An authorized connection writes the JSON as the value at `requests/<same UUID>` in the single `NEN_CI_BRIDGE_QUEUE_V1` namespace with `expiration_ttl:1800`. The Worker writes a result at `results/<UUID>` (and a one-time claim at `claims/<UUID>`) with a 7-day TTL. The result contains either `status:success,outcome` or `status:error,error`.
 
-### Credential setup (once, no local Mac required)
+### Legacy credential verification (existing setup; not a default agent task)
 
-1. In [CircleCI](https://app.circleci.com/settings/user/tokens), create a personal API token whose account has access to the required organization/project. CircleCI API v2 uses **personal API tokens**.
-2. Open Cloudflare Dashboard -> Workers & Pages -> `nen-ci-bridge` -> Settings -> Variables and Secrets. Add an encrypted **Secret** named `CIRCLE_TOKEN` with that personal API token. **Do not paste it into ChatGPT, any GitHub repo, KV, or the public site.**
-3. Confirm the Worker binding `QUEUE` points to KV namespace `NEN_CI_BRIDGE_QUEUE_V1` and the Cron Trigger runs once a minute.
-4. First run a `health` command. The result must contain `tokenConfigured:true` before any live trigger.
+1. The existing legacy Worker uses a CircleCI personal API token. **Do not create/rotate a token for normal GitHub-native CI.** Provisioning or rotation requires a separately approved security change.
+2. In Cloudflare Worker settings, verify only that `CIRCLE_TOKEN` exists as an encrypted **secret_text** binding; never view or replace its value as part of documentation or routine validation. **Never paste secrets into ChatGPT, GitHub, KV or a public site.**
+3. Confirm the Worker binding `QUEUE` points to KV namespace `NEN_CI_BRIDGE_QUEUE_V1`; the temporary Cron currently runs every five minutes (`*/5 * * * *`). Check its live schedule directly.
+4. Only when explicitly inspecting the legacy bridge, a scoped `health` command can establish `tokenConfigured:true` before an authorized live trigger; do not enqueue unnecessary diagnostics for ordinary developer CI.
 5. Send one authorized `trigger` request, inspect its result and read the actual CircleCI workflow status via a second `inspect` command. Do not claim that a pending pipeline passed.
 
 ### Security and delivery constraints
 
 - Only an account permitted to use the Cloudflare API can enqueue commands; `approved:true` is an intent check, not an authentication mechanism. The Cloudflare connector account must be treated as a privileged build operator.
 - Script registry locks project, branch, CircleCI definition ID and boolean pipeline parameter.
-- One request is processed per minute. The Worker records a claim **before** making an external call to reduce accidental duplicates; uncertain outcomes are **not auto-retried**. Workers KV is eventually consistent and does **not** provide exactly-once processing. Use a Durable Object later if strong coordination becomes necessary.
+- The legacy Cron processes at most one request every five minutes. This can delay pickup or cause queued requests to expire; never route ordinary agent-driven development validation here when native GitHub works. The Worker records a claim **before** making an external call to reduce accidental duplicates; uncertain outcomes are **not auto-retried**. Workers KV is eventually consistent and does **not** provide exactly-once processing. Any stronger coordination mechanism would require a demonstrated need, dedicated design review and separate approval — **not** default infrastructure.
 - Token is only passed outbound in CircleCI's `Circle-Token` header. Worker reports HTTP status but never response bodies, stack traces, tokens or credentials on errors.
 - Workers KV, CircleCI project and artifact URLs are not intended for public distribution.
 - Tests and releases must be separately approved. The `release` command requires `approved:true`, the approved branch and full SHA. CircleCI re-runs all QA on that exact revision and grants the release job its own restricted Cloudflare Pages secret only after success.
@@ -79,7 +89,7 @@ Tests inject a fake CircleCI API; **running them never creates a CircleCI pipeli
 
 Use the already connected Cloudflare API tool, not a public Worker URL:
 
-- Write: `PUT /accounts/<account-id>/storage/kv/namespaces/<namespace-id>/values/requests%2F<uuid>`, body of the command JSON and query `expiration_ttl=900`.
+- Write: `PUT /accounts/<account-id>/storage/kv/namespaces/<namespace-id>/values/requests%2F<uuid>`, body of the command JSON and query `expiration_ttl=1800`.
 - Read: `GET /accounts/<account-id>/storage/kv/namespaces/<namespace-id>/values/results%2F<uuid>`.
 - Prefixes `claims/` and `results/` are Worker-owned and must not be written by callers.
 
