@@ -8,7 +8,7 @@
 
 Reusable, private NEN CircleCI integration. **Scaffold only: not deployed or connected to ChatGPT yet.**
 
-## Security-first deployment
+## Historical experimental OAuth/MCP scaffold: security-first deployment notes (not the active CI path)
 
 1. Create a Cloudflare Access **self-hosted application** protecting the Worker `/mcp` route; only allow trusted NEN identities. Never expose MCP tools without Access.
 2. Deploy only after Access is configured. Run `pnpm install`, `pnpm check`, `pnpm test`, `pnpm deploy`.
