@@ -58,19 +58,19 @@ For read-only inspection, use `"action":"inspect"` and `"pipelineId":"<UUID>"`, 
 
 An authorized connection writes the JSON as the value at `requests/<same UUID>` in the single `NEN_CI_BRIDGE_QUEUE_V1` namespace with `expiration_ttl:1800`. The Worker writes a result at `results/<UUID>` (and a one-time claim at `claims/<UUID>`) with a 7-day TTL. The result contains either `status:success,outcome` or `status:error,error`.
 
-### Credential setup (once, no local Mac required)
+### Legacy credential verification (existing setup; not a default agent task)
 
-1. In [CircleCI](https://app.circleci.com/settings/user/tokens), create a personal API token whose account has access to the required organization/project. CircleCI API v2 uses **personal API tokens**.
-2. Open Cloudflare Dashboard -> Workers & Pages -> `nen-ci-bridge` -> Settings -> Variables and Secrets. Add an encrypted **Secret** named `CIRCLE_TOKEN` with that personal API token. **Do not paste it into ChatGPT, any GitHub repo, KV, or the public site.**
+1. The existing legacy Worker uses a CircleCI personal API token. **Do not create/rotate a token for normal GitHub-native CI.** Provisioning or rotation requires a separately approved security change.
+2. In Cloudflare Worker settings, verify only that `CIRCLE_TOKEN` exists as an encrypted **secret_text** binding; never view or replace its value as part of documentation or routine validation. **Never paste secrets into ChatGPT, GitHub, KV or a public site.**
 3. Confirm the Worker binding `QUEUE` points to KV namespace `NEN_CI_BRIDGE_QUEUE_V1`; the temporary Cron currently runs every five minutes (`*/5 * * * *`). Check its live schedule directly.
-4. First run a `health` command. The result must contain `tokenConfigured:true` before any live trigger.
+4. Only when explicitly inspecting the legacy bridge, a scoped `health` command can establish `tokenConfigured:true` before an authorized live trigger; do not enqueue unnecessary diagnostics for ordinary developer CI.
 5. Send one authorized `trigger` request, inspect its result and read the actual CircleCI workflow status via a second `inspect` command. Do not claim that a pending pipeline passed.
 
 ### Security and delivery constraints
 
 - Only an account permitted to use the Cloudflare API can enqueue commands; `approved:true` is an intent check, not an authentication mechanism. The Cloudflare connector account must be treated as a privileged build operator.
 - Script registry locks project, branch, CircleCI definition ID and boolean pipeline parameter.
-- The legacy Cron processes at most one request every five minutes. This can delay pickup or cause queued requests to expire; never route ordinary agent-driven development validation here when native GitHub works. The Worker records a claim **before** making an external call to reduce accidental duplicates; uncertain outcomes are **not auto-retried**. Workers KV is eventually consistent and does **not** provide exactly-once processing. Use a Durable Object later if strong coordination becomes necessary.
+- The legacy Cron processes at most one request every five minutes. This can delay pickup or cause queued requests to expire; never route ordinary agent-driven development validation here when native GitHub works. The Worker records a claim **before** making an external call to reduce accidental duplicates; uncertain outcomes are **not auto-retried**. Workers KV is eventually consistent and does **not** provide exactly-once processing. Any stronger coordination mechanism would require a demonstrated need, dedicated design review and separate approval — **not** default infrastructure.
 - Token is only passed outbound in CircleCI's `Circle-Token` header. Worker reports HTTP status but never response bodies, stack traces, tokens or credentials on errors.
 - Workers KV, CircleCI project and artifact URLs are not intended for public distribution.
 - Tests and releases must be separately approved. The `release` command requires `approved:true`, the approved branch and full SHA. CircleCI re-runs all QA on that exact revision and grants the release job its own restricted Cloudflare Pages secret only after success.
