@@ -66,6 +66,30 @@ test('rejects a forged non-CircleCI download host',async()=>{
   await assert.rejects(()=>executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,t.send),/Unsafe artifact URL/);
   assert.equal(t.requests.some(r=>r.url.includes('evil.example')),false);
 });
+test('a signed S3 redirect does not receive the CircleCI token',async()=>{
+  const t=transport();
+  const signed='https://qa-artifacts.s3.amazonaws.com/synthetic-image.png';
+  const follow=[];
+  const send=async(url,options)=>{
+    if(url===artifactUrl)return new Response(null,{status:302,headers:{location:signed}});
+    if(url===signed){follow.push(options.headers);return new Response(bytes,{headers:{'Content-Type':'image/png'}});}
+    return t.send(url,options);
+  };
+  const result=await executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,send);
+  assert.equal(result.bytes,bytes.length);
+  assert.equal(Object.hasOwn(follow[0],'Circle-Token'),false);
+});
+test('a redirect to an unexpected origin is rejected before contacting it',async()=>{
+  const t=transport();
+  let attempted=false;
+  const send=async(url,options)=>{
+    if(url===artifactUrl)return new Response(null,{status:302,headers:{location:'https://untrusted.example/synthetic.png'}});
+    if(url.includes('untrusted.example'))attempted=true;
+    return t.send(url,options);
+  };
+  await assert.rejects(()=>executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,send),/Unsafe artifact URL/);
+  assert.equal(attempted,false);
+});
 test('rejects oversized screenshots before reading the body',async()=>{
   const t=transport({length:900001});
   await assert.rejects(()=>executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,t.send),/Artifact too large/);
