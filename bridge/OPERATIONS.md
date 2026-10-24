@@ -62,6 +62,66 @@ Result key is `results/<UUID>`, structure `{id,status:"success",action,updatedAt
 
 Historical proof: [AmaraiiOS Games PR #8](https://github.com/dev-amaraii/amaraii-os/pull/8), SHA `adf2480ee9867acbc1f903a42a7c395cc872715f`, reported `ci/circleci: validate = success` on 21 October 2026; verify anew for any later revision.
 
+
+### Proposed read-only UI artifact preview (24 October 2026; not yet deployed)
+
+A narrowly scoped capability implemented on branch \`codex/ci-artifact-preview-20261024\`.
+It remains **candidate source**, not proof of the active Worker. Do not enqueue this
+action until the Worker is independently tested, deployed and verified.
+
+CircleCI supports \`GET /api/v2/project/{project-slug}/{job-number}/artifacts\`
+and authenticated retrieval of an individual listed artifact. Ordinary \`inspect\`
+already returns artifact path metadata. The new \`artifact_preview\` action retrieves
+the bytes for **one explicitly selected disposable NEN QA PNG** and stores a
+base64-encoded response in the existing private \`results/<UUID>\` KV slot:
+
+\`\`\`json
+{
+  "v": 1,
+  "id": "<fresh UUID matching requests/<UUID>>",
+  "action": "artifact_preview",
+  "project": "amaraii-os",
+  "pipelineId": "<confirmed CircleCI pipeline UUID>",
+  "jobId": "<confirmed CircleCI job UUID>",
+  "jobNumber": 49,
+  "artifactPath": "nen-customer-operations-qa/customer-pending-light-1440.png",
+  "requestedAt": "<current ISO UTC timestamp>",
+  "approved": true
+}
+\`\`\`
+
+This is a **read-only operation**, not a pipeline trigger or deployment. The
+backend verifies the pipeline's pinned AmaraiiOS project, the job's membership in
+that pipeline, and an exact artifact path from the CircleCI artifact manifest.
+Allowed artifact prefixes: \`nen-customer-operations-qa/\`,
+\`bank-transfer-qa/\`, \`qa-intel/transactions/\`; only \`.png\`.
+Responses are capped at 900,000 binary bytes and checked for PNG signature and
+content type. CircleCI access credentials stay inside the Worker, and temporary
+artifact download URLs are **never returned**. Redirects are not followed unless
+the destination is an approved HTTPS artifact host. No public Worker endpoint,
+general-purpose proxy, new binding, background scanner or Cron change is added.
+The Jayson preview-release workflow remains unchanged and does not gain access
+to this preview operation.
+
+A successful result is shaped:
+\`{id,status:"success",action:"artifact_preview",outcome:{path,jobNumber,mediaType:"image/png",bytes,dataBase64}}\`.
+Decode \`dataBase64\` **only inside the authenticated operator session** and render
+the resulting image in the inspection tool; do not paste base64 screenshots or
+signed URLs into GitHub issues, chat transcripts, Cloudflare logs or Context OS.
+Artifacts may contain test data: use disposable/synthetic screenshots only.
+A failed CircleCI job can have **zero stored artifacts** if it failed before its
+\`store_artifacts\` steps. A screenshot artifact also does not establish
+authenticated production UI correctness.
+
+**Release gate:** execute \`cd bridge && node --test tests/*.test.mjs\` against
+the reviewed source; confirm the GitHub branch is reconciled with the actual
+active Worker version; stage a Worker version preserving \`CIRCLE_TOKEN\`
+\`secret_text\` and \`QUEUE\` KV bindings; verify staged bindings and version;
+then, after approval, activate and smoke-test a read-only preview against an
+existing disposable CircleCI job. Preserve and test rollback to the previous
+active version. Never update the Worker based on a stale GitHub mirror.
+
+
 ### Legacy private KV recipe: explicit fallback / Jayson gated preview release only
 
 Use only when the needed capability **cannot** be completed with GitHub and the specific action is explicitly authorized. The Jayson SHA-pinned preview release remains separately protected; AmaraiiOS `run-ci` is **not** a Jayson release trigger.
