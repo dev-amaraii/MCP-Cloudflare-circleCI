@@ -100,3 +100,39 @@ test('rejects non-image responses and invalid image signatures',async()=>{
   const forged=transport({payload:Buffer.from('<html>not an image</html>'),mime:'image/png'});
   await assert.rejects(()=>executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,forged.send),/Artifact format not supported/);
 });
+
+
+test('supports the observed CircleCI regional S3 redirect without forwarding credentials',async()=>{
+  const t=transport();
+  const signed='https://circleci-tasks-prod.s3.us-east-1.amazonaws.com/synthetic.png?signature=private';
+  let downloads=0;
+  const send=async(url,options)=>{
+    if(url===artifactUrl)return new Response(null,{status:302,headers:{location:signed}});
+    if(url===signed){
+      downloads++;
+      assert.equal(Object.hasOwn(options.headers,'Circle-Token'),false);
+      return new Response(bytes,{headers:{'Content-Type':'image/png'}});
+    }
+    return t.send(url,options);
+  };
+  const result=await executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,send);
+  assert.equal(downloads,1);
+  assert.equal(result.bytes,bytes.length);
+  assert.equal(JSON.stringify(result).includes('signature'),false);
+  const other=transport({location:'https://other.s3.us-east-1.amazonaws.com/private.png'});
+  await assert.rejects(()=>executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,other.send),/Unsafe artifact URL/);
+});
+
+test('enforces byte limit on streamed bodies without content-length',async()=>{
+  const t=transport();
+  let cancelled=false;
+  const send=async(url,options)=>{
+    if(url===artifactUrl)return new Response(new ReadableStream({
+      start(controller){controller.enqueue(new Uint8Array(450000));controller.enqueue(new Uint8Array(450001));},
+      cancel(){cancelled=true;},
+    }),{headers:{'Content-Type':'image/png'}});
+    return t.send(url,options);
+  };
+  await assert.rejects(()=>executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,send),/Artifact too large/);
+  assert.equal(cancelled,true);
+});

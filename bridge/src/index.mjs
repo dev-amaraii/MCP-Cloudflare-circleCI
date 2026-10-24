@@ -22,15 +22,16 @@ const NEN_QA_IMAGE = /^(?:nen-customer-operations-qa|bank-transfer-qa|qa-intel\/
 
 function artifactHostAllowed(url) {
   const h = url.hostname.toLowerCase();
-  return url.protocol === 'https:' && !url.username && !url.password &&
+  return url.protocol === 'https:' && !url.username && !url.password && !url.port &&
     (h === 'circleci.com' || h.endsWith('.circle-artifacts.com') ||
-      h === 'circle-artifacts.com' || h === 's3.amazonaws.com' || h.endsWith('.s3.amazonaws.com'));
+      h === 'circle-artifacts.com' ||
+      h === 'circleci-tasks-prod.s3.us-east-1.amazonaws.com' || h === 's3.amazonaws.com' || h.endsWith('.s3.amazonaws.com'));
 }
 
 async function downloadQaImage(env, urlValue, requestFn = fetch) {
   let url;
   try { url = new URL(urlValue); } catch { throw new Error('Unsafe artifact URL'); }
-  if (!artifactHostAllowed(url)) throw new Error('Unsafe artifact URL');
+  if (!artifactHostAllowed(url)) throw new Error('Unsafe artifact URL: ' + url.hostname);
   for (let attempt = 0; attempt < 3; attempt++) {
     const trusted = url.hostname === 'circleci.com' ||
       url.hostname === 'circle-artifacts.com' || url.hostname.endsWith('.circle-artifacts.com');
@@ -42,7 +43,7 @@ async function downloadQaImage(env, urlValue, requestFn = fetch) {
       const location = response.headers.get('location');
       if (!location) throw new Error('Artifact download failed');
       url = new URL(location, url);
-      if (!artifactHostAllowed(url)) throw new Error('Unsafe artifact URL');
+      if (!artifactHostAllowed(url)) throw new Error('Unsafe artifact URL: ' + url.hostname);
       continue;
     }
     if (!response.ok || !response.body) throw new Error('Artifact download failed');
@@ -568,7 +569,8 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
-    const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ? message
+    const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ||
+      /^Unsafe artifact URL: [a-z0-9.-]{1,253}$/.test(message) ? message
       : err instanceof SyntaxError ? 'Invalid JSON response or command'
       : /^CircleCI v3 HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof TypeError ? 'Network or API transport failure'
