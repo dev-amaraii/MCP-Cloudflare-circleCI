@@ -18,6 +18,10 @@
 - The legacy bridge still carries **Jayson Storefront's** explicitly approved, exact-SHA, QA-gated preview release path. Native AmaraiiOS `run-ci` **does not replace release authorization**. Do **not disable Cron or delete KV** until every remaining legacy consumer (including Jayson) has a tested, approved on-demand alternative.
 - In the deployed bridge source, `amaraii-os` is allowed only for validation on its hardcoded pilot/development/staging branches; release is **denied**. `jayson-storefront` has its own restricted `feat/storefront-demo` QA/release path. The feature branch used for native GitHub CI may have more permissive branch rules; **do not assume the old bridge allowlist matches it**.
 
+## Candidate CircleCI UI screenshot retrieval (24 October 2026)
+
+The separate draft [artifact-preview PR #5](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/5) adds read-only `artifact_preview` for approved NEN QA PNG artifacts. It requires exact `amaraii-os` pipeline/job ownership and path allowlists, caps binary reads, and returns screenshot bytes through the private KV result. CircleCI v2 already supports job artifact listing and download; this source change adds controlled image retrieval to the bridge. **It is not deployed or verified against live CircleCI yet.** Read [OPERATIONS.md](OPERATIONS.md) and run `cd bridge && node --test tests/*.test.mjs` before attempting a staged Worker version; reconcile the live script with the GitHub mirror first and preserve existing Jayson release paths, bindings and rollback. Do not claim that a CI artifact screenshot substitutes for production browser interaction tests.
+
 ## Security and execution
 
 - Never expose, print, replace or copy `CIRCLE_TOKEN` or any deployment credential. Do not write secrets to GitHub, Notion, chat, CircleCI output, KV values or logs. If handling Worker versions, preserve and verify `secret_text` and `kv_namespace` bindings before any expressly approved deploy.

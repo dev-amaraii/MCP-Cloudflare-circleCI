@@ -16,6 +16,68 @@ const MAX_REQUEST_AGE_MS = 30 * 60 * 1000;
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
 
+const IMAGE_ARTIFACT_MAX_BYTES = 900000;
+// Only disposable NEN QA screenshots, never an arbitrary CircleCI artifact or URL.
+const NEN_QA_IMAGE = /^(?:nen-customer-operations-qa|bank-transfer-qa|qa-intel\/transactions)\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/;
+
+function artifactHostAllowed(url) {
+  const h = url.hostname.toLowerCase();
+  return url.protocol === 'https:' && !url.username && !url.password &&
+    (h === 'circleci.com' || h.endsWith('.circle-artifacts.com') ||
+      h === 'circle-artifacts.com' || h === 's3.amazonaws.com' || h.endsWith('.s3.amazonaws.com'));
+}
+
+async function downloadQaImage(env, urlValue, requestFn = fetch) {
+  let url;
+  try { url = new URL(urlValue); } catch { throw new Error('Unsafe artifact URL'); }
+  if (!artifactHostAllowed(url)) throw new Error('Unsafe artifact URL');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const trusted = url.hostname === 'circleci.com' ||
+      url.hostname === 'circle-artifacts.com' || url.hostname.endsWith('.circle-artifacts.com');
+    const response = await requestFn(url.toString(), {
+      method: 'GET', redirect: 'manual',
+      headers: trusted ? { 'Circle-Token': env.CIRCLE_TOKEN, 'Accept': 'image/png' } : { 'Accept': 'image/png' },
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location');
+      if (!location) throw new Error('Artifact download failed');
+      url = new URL(location, url);
+      if (!artifactHostAllowed(url)) throw new Error('Unsafe artifact URL');
+      continue;
+    }
+    if (!response.ok || !response.body) throw new Error('Artifact download failed');
+    const length = Number(response.headers.get('content-length') || 0);
+    if (length > IMAGE_ARTIFACT_MAX_BYTES) throw new Error('Artifact too large');
+    const type = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+    if (type && type !== 'image/png' && type !== 'application/octet-stream') throw new Error('Artifact format not supported');
+    const reader = response.body.getReader(), chunks = [];
+    let count = 0;
+    for (;;) {
+      const {value,done} = await reader.read();
+      if (done) break;
+      count += value.byteLength;
+      if (count > IMAGE_ARTIFACT_MAX_BYTES) {
+        await reader.cancel();
+        throw new Error('Artifact too large');
+      }
+      chunks.push(value);
+    }
+    if (!count) throw new Error('Artifact download failed');
+    const bytes = new Uint8Array(count);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const signature = [137,80,78,71,13,10,26,10];
+    if (!signature.every((b,i)=>bytes[i]===b)) throw new Error('Artifact format not supported');
+    let binary = '';
+    for (let i=0;i<bytes.length;i+=16384) {
+      binary += String.fromCharCode(...bytes.subarray(i,i+16384));
+    }
+    return {mediaType:'image/png', bytes:count, dataBase64:btoa(binary)};
+  }
+  throw new Error('Artifact download failed');
+}
+
+
 export const PROJECTS = Object.freeze({
   'amaraii-os': Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw',
@@ -44,7 +106,7 @@ function hasOnlyKeys(value, keys) {
 
 export function validateCommand(command, keyId, now = Date.now()) {
   if (!isPlainObject(command) ||
-      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','commitSha','pipelineId','startNumber','jobNumber','jobId','requestedAt','approved'])) {
+      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','commitSha','pipelineId','startNumber','jobNumber','jobId','artifactPath','requestedAt','approved'])) {
     throw new Error('Invalid command shape');
   }
   if (command.v !== 1 || command.id !== keyId || !UUID.test(command.id)) {
@@ -91,6 +153,19 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Recent command has unexpected fields');
     return { command, project };
+  }
+  if (command.action === 'artifact_preview') {
+    if (command.project !== 'amaraii-os' || !Number.isSafeInteger(command.jobNumber) ||
+        command.jobNumber < 1 || command.jobNumber > 999999 ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.artifactPath !== 'string' || command.artifactPath.length > 240 ||
+        !NEN_QA_IMAGE.test(command.artifactPath) || command.artifactPath.includes('..') ||
+        command.branch !== undefined || command.mode !== undefined || command.commitSha !== undefined ||
+        command.startNumber !== undefined) {
+      throw new Error('Artifact preview not permitted');
+    }
+    return {command,project};
   }
   if (command.action === 'job_steps') {
     if (!Number.isSafeInteger(command.jobNumber) || command.jobNumber < 1 || command.jobNumber > 999999) throw new Error('Invalid job number');
@@ -239,6 +314,36 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
       pipelines: (recent.items || []).filter(p => p.project_slug === project.slug && p.vcs?.branch === command.branch).slice(0, 10)
         .map(p => ({ id: p.id, number: p.number, state: p.state, createdAt: p.created_at, revision: p.vcs?.revision, errors: (p.errors || []).slice(0,3).map(e=>({type:e.type})) })),
     };
+  }
+  if (command.action === 'artifact_preview') {
+    const pipeline = await circleRequest(env,'/pipeline/'+command.pipelineId,undefined,requestFn);
+    if (pipeline.project_slug !== project.slug) throw new Error('Pipeline project mismatch');
+    const workflows = await circleRequest(env,'/pipeline/'+command.pipelineId+'/workflow',undefined,requestFn);
+    let owned = false;
+    for (const workflow of (workflows.items || []).slice(0,8)) {
+      const jobs = await circleRequest(env,'/workflow/'+workflow.id+'/job',undefined,requestFn);
+      if ((jobs.items || []).some(job=>job.id===command.jobId &&
+          job.job_number===command.jobNumber && job.project_slug===project.slug)) {
+        owned = true;
+        break;
+      }
+    }
+    if (!owned) throw new Error('Job does not belong to approved pipeline');
+    let token, found = null;
+    for (let page=0;page<5;page++) {
+      const path='/project/'+project.slug+'/'+command.jobNumber+'/artifacts'+
+        (token?'?page-token='+encodeURIComponent(token):'');
+      const list=await circleRequest(env,path,undefined,requestFn);
+      found=(list.items||[]).find(item=>item.path===command.artifactPath);
+      if (found) break;
+      token=typeof list.next_page_token==='string'&&list.next_page_token.length<500?
+        list.next_page_token:null;
+      if (!token) break;
+    }
+    if (!found || typeof found.url!=='string') throw new Error('Artifact not found');
+    const preview=await downloadQaImage(env,found.url,requestFn);
+    // The URL (which can be short-lived or signed) must never be returned.
+    return {path:command.artifactPath,jobNumber:command.jobNumber,...preview};
   }
   if (command.action === 'job_steps') {
     // Check both pipeline and workflow ownership before requesting v3 job data.
@@ -454,6 +559,7 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields', 'Audit command has unexpected fields', 'Invalid starting pipeline number',
       'Invalid release revision', 'Release command has unexpected fields', 'Invalid job number', 'Job inspection has unexpected fields', 'Job project mismatch',
       'Invalid job identity', 'Job steps have unexpected fields', 'Job does not belong to approved pipeline', 'Job identity mismatch',
+      'Artifact preview not permitted', 'Artifact not found', 'Artifact too large', 'Artifact format not supported', 'Artifact download failed', 'Unsafe artifact URL',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
