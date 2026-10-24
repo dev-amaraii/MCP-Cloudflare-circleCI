@@ -29,3 +29,11 @@
 - KV claims are eventually consistent, not atomic exactly-once. The single consumer and zero retries reduce duplicate paid requests. An uncertain trigger or failed result write requires read-only reconciliation before a deliberate new request. No automatic retry or background status poller exists.
 - Restoring pre-change version `332c29dd-5363-4626-a18f-fb0575ae32da` alone cannot process Queue commands. For recovery, pause the consumer before switching versions, preserve KV/secrets, and keep Cron disabled unless explicitly approved. Reconcile in-flight commands first.
 - Agent procedure is in [OPERATIONS.md](OPERATIONS.md). Writing legacy KV request keys alone no longer invokes the bridge.
+
+## Final source synchronization — 24 October 2026
+
+- Owner explicitly approved a squash merge of PR #6 only while its head remained `cfb30303ee44f9f0037f196eb4f2c4ec4f85f07a`. The head was checked immediately before merging, and GitHub enforced it with `expected_head_sha`.
+- [PR #6](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/6) was squash-merged into `main` as [`c7becad549544b6fffb6d1a6f546a2a463c8a8d8`](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/commit/c7becad549544b6fffb6d1a6f546a2a463c8a8d8). Its sole parent is `bec0df484923a0c5dee811275e0c2414fecf58de`; its entire file tree is identical to the approved PR head.
+- The merged runtime source SHA-256 is `93e0bbbba11dd2c1a9f614fe4f4ef42e367e298d261427bdeb5fa67750799a7b`, matching the existing live Worker source byte for byte. Agent instructions, operation runbook, tests and on-demand configuration are now on `main`.
+- **No redeployment or production mutation was performed for this merge.** Read-only before/after checks confirmed the same active version `54a4b503-e2af-4bfd-b3b8-bf3e5c1fcc03`, deployment `ff98a54b-82cc-4fec-b830-1deb1a3b0a7a`, encrypted-secret/KV binding metadata, compatibility settings, empty schedules, disabled public/preview URLs and Queue consumer configuration.
+- This final record update is documentation only. Existing runtime commit annotations remain `4640e6582a3f2c1ae06c1cfda40b45f84c3ba70c`; squash-merge provenance is recorded here without changing Worker metadata. No additional CI run, application release, migration or billing change was requested or performed.
