@@ -1,7 +1,7 @@
 /**
  * NEN CI Bridge — private Cloudflare KV mailbox, no HTTP command endpoint.
  * Only Cloudflare-account-authorized clients can enqueue requests through
- * the KV control-plane API. Configured Cron consumes at most one request per scheduled tick (normally every five minutes).
+ * the Cloudflare Queues control-plane API. No scheduled polling runs.
  *
  * No direct deployment, cancellation, rerun or arbitrary URL functionality.
  * Approved release requests only trigger a separate SHA-pinned CircleCI
@@ -508,7 +508,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
 /**
  * At-most-once best-effort processing: record a claim BEFORE the external
  * API call and never automatically replay an uncertain result. KV is
- * eventually consistent, so use one cron consumer and one request at a time.
+ * eventually consistent, so use one queue consumer and one request at a time.
  * There is no exactly-once transactional guarantee.
  */
 export async function processOne(env, now = Date.now(), requestFn = fetch) {
@@ -517,30 +517,35 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
   const item = listing.keys?.[0];
   if (!item) return { empty: true };
 
-  const id = item.name.slice(PREFIX.length);
+  const raw = await env.QUEUE.get(item.name);
+  return processRequest(env, item.name.slice(PREFIX.length), raw, now, requestFn, item.name);
+}
+
+export async function processRequest(env, id, raw, now = Date.now(), requestFn = fetch, legacyKey) {
+  if (!env.QUEUE) throw new Error('QUEUE KV binding is required');
+  const cleanup = async () => { if (legacyKey) await env.QUEUE.delete(legacyKey); };
   const resultKey = RESULT_PREFIX + id;
   const claimKey = CLAIM_PREFIX + id;
   if (!UUID.test(id)) {
-    await env.QUEUE.delete(item.name);
+    await cleanup();
     return { rejected: 'malformed-key' };
   }
 
   const prior = await env.QUEUE.get(resultKey) || await env.QUEUE.get(claimKey);
   if (prior) {
-    await env.QUEUE.delete(item.name);
+    await cleanup();
     return { skipped: true, id };
   }
 
   const timestamp = new Date(now).toISOString();
   let command;
   try {
-    const raw = await env.QUEUE.get(item.name);
     if (!raw || raw.length > 4096) throw new Error('Invalid or oversized command');
     command = JSON.parse(raw);
     const validated = validateCommand(command, id, now);
     // A distinct claim key avoids KV's one-write-per-second per-key limit.
     await env.QUEUE.put(claimKey, JSON.stringify({ id, status:'claimed', action:command.action, updatedAt:timestamp }), { expirationTtl: RESULT_TTL_SECONDS });
-    await env.QUEUE.delete(item.name);
+    await cleanup();
     const outcome = await executeCommand(env, command, validated.project, requestFn);
     const result = { id, status:'success', action:command.action, updatedAt:new Date().toISOString(), outcome };
     await env.QUEUE.put(resultKey, JSON.stringify(result), { expirationTtl: RESULT_TTL_SECONDS });
@@ -570,7 +575,7 @@ export async function processOne(env, now = Date.now(), requestFn = fetch) {
       : 'Bridge request failed';
     const result = { id, status:'error', action:command?.action ?? 'unknown', updatedAt:new Date().toISOString(), error };
     await env.QUEUE.put(resultKey, JSON.stringify(result), { expirationTtl: RESULT_TTL_SECONDS });
-    await env.QUEUE.delete(item.name);
+    await cleanup();
     return result;
   }
 }
@@ -581,7 +586,19 @@ export default {
   fetch() {
     return new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
   },
-  async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(processOne(env));
+  async queue(batch, env) {
+    for (const message of batch.messages) {
+      try {
+        // Cloudflare authenticates the producer API. The body is still untrusted.
+        const raw = JSON.stringify(message.body);
+        const id = message.body?.id;
+        if (typeof id !== 'string' || !UUID.test(id)) continue;
+        await processRequest(env, id, raw, Date.now());
+      } finally {
+        // Never replay a potentially paid trigger after an ambiguous failure.
+        // Consumer max_retries=0 also covers an invocation terminating abruptly.
+        message.ack();
+      }
+    }
   },
 };

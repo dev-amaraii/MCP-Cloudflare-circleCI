@@ -8,11 +8,13 @@ preview_urls = false
 binding = "QUEUE"
 id = "3ad53b33be4346a0b6cf1e1d3047ede4"
 
+# Commands arrive through the authenticated Cloudflare Queues API only.
+[[queues.consumers]]
+queue = "nen-ci-bridge-commands"
+max_batch_size = 1
+max_batch_timeout = 0
+max_concurrency = 1
+max_retries = 0
+
 [triggers]
-# VERIFIED LIVE 2026-10-22: Cloudflare schedule-only API update set */5 * * * *.
-# Temporary legacy-KV mitigation (~288 idle KV.list calls/day); NOT the
-# preferred agent-testing path. Native GitHub run-ci PR-label triggers CircleCI
-# on demand with no KV. Retain Cron while Jayson separately gated preview
-# release (and any other KV consumer) still depends on this private bridge.
-# Changing this repository file does NOT deploy or update the live Worker.
-crons = ["*/5 * * * *"]
+crons = []
