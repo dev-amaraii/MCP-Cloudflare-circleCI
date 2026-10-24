@@ -1,8 +1,8 @@
 # NEN CircleCI MCP (Cloudflare Workers)
 
-> **NEN CI operating decision — 22 October 2026 (approved):** For agent-driven AmaraiiOS tests, use the **native connected GitHub integration**: an explicitly requested `run-ci` PR-label-added event invokes CircleCI, then read the `ci/circleci: validate` check for the **exact current head SHA** and follow its CircleCI job URL only when needed. **No new API, Queue, background polling, or KV cache by default.** Build only proven missing capabilities. Details: [root AGENTS.md](AGENTS.md), [NEN Context OS](https://app.notion.com/p/3fffa5e3c90581ceab86f62e1b1fb5a5), [gap-tracking issue #4](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/issues/4).
+> **Current CI direction — 24 October 2026:** the owner requested the existing private bridge be operational for on-demand tests and QA screenshot inspection, with five-minute polling removed. Use [bridge/OPERATIONS.md](bridge/OPERATIONS.md), [bridge/AGENTS.md](bridge/AGENTS.md), and [release evidence](bridge/DEPLOYMENT-20261024.md). Commands arrive through authenticated Cloudflare Queues, results stay in existing private KV, and no public command/download endpoint is exposed. Native GitHub `run-ci` validation remains available. Jayson release retains separate exact-SHA approval and QA gates.
 
-> **Repo layout:** This README describes the **experimental root OAuth/MCP scaffold**, not the active execution Worker. The deployed private `nen-ci-bridge` source/runbooks live on the [feature branch](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/tree/feat/nen-ci-kv-bridge/bridge) and updated [draft PR #3](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/3). On 22 October, its live Cron was updated to `*/5 * * * *` without a Worker code deployment; this is a **temporary** mitigation. Existing Jayson preview releases still require the legacy bridge and their distinct exact-SHA/QA/restricted-credential safeguards. Do not disable that Cron until a safe replacement is proven.
+> **Repo layout:** the active execution Worker is `bridge/` (`nen-ci-bridge`). The root OAuth/MCP scaffold described below is a separate historical experiment.
 
 ---
 

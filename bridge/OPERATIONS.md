@@ -1,42 +1,60 @@
-# NEN private CI bridge — operations and agent contract
+# NEN CI bridge — on-demand operations
 
-**Accepted operating policy (22 October 2026):** Use the native GitHub `run-ci` PR-label → CircleCI path for ordinary AmaraiiOS developer validation. Inspect GitHub `ci/circleci: validate` on the exact *current* head SHA and open its CircleCI job link on demand. The KV mailbox below remains a **legacy fallback / Jayson separately gated preview-release path**, not the preferred testing path. No new gateway, KV cache, Cloudflare Queue, scheduler or background polling is approved. Consult [NEN Context OS](https://app.notion.com/p/3fffa5e3c90581ceab86f62e1b1fb5a5), [issue #4](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/issues/4), and [AGENTS.md](AGENTS.md).
+**Owner-approved direction, 24 October 2026:** agents can run QA and inspect artifacts on demand through the existing private bridge. Five-minute polling is removed. This supersedes the older KV/Cron protocol and the earlier proposal restriction on Cloudflare Queues for this bridge.
 
-**Implementation source:** [src/index.mjs](src/index.mjs), [wrangler.toml](wrangler.toml), and tests in `tests/`. Mirror checkpoint `a642430e` (20 Oct) was not separately revalidated by new bridge-source CI. **Live evidence from 22 October 2026:** deployed Worker version `332c29dd-5363-4626-a18f-fb0575ae32da`; bindings `CIRCLE_TOKEN: secret_text` and `QUEUE: kv_namespace`; Cron `*/5 * * * *` after a schedule-only API change, with NO Worker code redeploy. Draft [PR #3](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/3) contains matching Wrangler config and docs but is not merged. Always recheck Cloudflare before changes.
+## Authoritative resources
 
-## Ownership, system layout, endpoints
+- NEN DevOps account: `9483d072db9941b23fe0bcd92d76d0d6`.
+- Existing Worker: `nen-ci-bridge`. Its HTTP handler always returns 404; workers.dev and preview URLs remain disabled.
+- Command Queue: `nen-ci-bridge-commands`, ID `ba62fb5b0b304d6591cf0a3605125807`.
+- Existing result KV: `NEN_CI_BRIDGE_QUEUE_V1`, ID `3ad53b33be4346a0b6cf1e1d3047ede4`, Worker binding `QUEUE`.
+- Existing encrypted Worker secret: `CIRCLE_TOKEN`. Never read/export/print it. Cloudflare-account permissions authorize callers; `approved:true` alone does not.
+- Source: `bridge/src/index.mjs`; configuration: `bridge/wrangler.toml`. The experimental root `nen-circleci-mcp` is distinct.
 
-- Owner: **NEN International (NEN Context OS)**. Distinguish this project from the experimental `nen-circleci-mcp` (read-only OAuth/MCP, not the execution bridge).
-- Cloudflare Worker script: `nen-ci-bridge`, Workers `fetch` returns **404**; `workers.dev` and preview URLs disabled. **There is no public /trigger URL.**
-- Cloudflare account: NEN DevOps; identify its current `account_id` from the connected Cloudflare tool or account settings. Worker binding `QUEUE` points to Workers KV `NEN_CI_BRIDGE_QUEUE_V1` (current namespace ID in `wrangler.toml`). Worker binding `CIRCLE_TOKEN` is a **secret_text**; never read, export or write its value to Git, Notion, logs or chat.
-- **Live** Cron (verified 22 Oct) is `*/5 * * * *`; one KV list per tick even when idle and at most **one queued command per tick**. Previous `* * * * *` could cause 1,440 idle list calls/day vs Free 1,000/day allowance. Five-minute cadence is ~288 expected idle lists/day (80% reduction) but is not zero usage, and account-wide quotas remain unmeasured. Pickup can take ~5 minutes; sustained queues can expire because requests have a 30-minute maximum age. This schedule is a temporary mitigation only. Requests still require fresh UTC time, v1, matching UUID, scoped project/action/branch, and `approved:true`.
-- Cloudflare control-plane operations using an authenticated NEN Cloudflare connection:
-  - `GET /accounts/{account_id}/workers/scripts/nen-ci-bridge/settings` — verify bindings **names/types only**.
-  - `GET /accounts/{account_id}/workers/scripts/nen-ci-bridge/deployments` — identify **active version**; secret existence on an inactive version is not proof.
-  - `GET /accounts/{account_id}/workers/scripts/nen-ci-bridge/schedules` — verify Cron.
-  - `PUT /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/values/requests/{UUID}?expiration_ttl=1800` — enqueue JSON. Use Cloudflare API `rawBody:true`, `contentType:'application/json'`.
-  - `POST /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/get` with JSON `{"keys":["results/<UUID>"],"type":"json"}` — read result. `GET .../values/results/<UUID>` can return a transient 404 even after the key appears; prefer bulk get with a bounded wait.
-  - `GET .../keys?prefix=requests/`, `claims/`, or `results/` — discover queue status. **Never** write `claims/` or `results/` yourself.
-- Internal Worker-to-CircleCI endpoints (not direct external tools): `POST https://circleci.com/api/v2/project/{project_slug}/pipeline/run`; `GET /api/v2/pipeline/{id}`, `/pipeline/{id}/workflow`, `/workflow/{id}/job`, `/project/{slug}/pipeline?branch=...`, `/project/{slug}/pipeline/{number}`, `/project/{slug}/job/{number}`; scoped job details `GET /api/v3/jobs/{job_uuid}` and failed-step condensed stdout `GET /api/v3/jobs/{job_uuid}/stdout/condensed?filter[execution]=...&filter[step_num]=...`. The Worker sends the secret outbound with **redirects not followed**, returning only sanitized metadata and known error categories.
+## Send a command
 
-## Supported allowlisted project capabilities
+Use the connected **NEN Cloudflare API**, never a public Worker URL. First verify the target project's current HEAD and relevant existing CI status. Test requests within the user's QA task are on demand; a Jayson release always needs separate explicit approval. Avoid duplicate runs on an already verified SHA.
 
-| Command project | CircleCI source | Branches | Modes | Release |
-| --- | --- | --- | --- | --- |
-| `amaraii-os` | `dev-amaraii/amaraii-os`, definition `c4c6aad9-03c1-4e9e-99ca-cd650deda730` | `codex/p2-live-billing-pilot`, `development`, `staging` | `validation` → `run_validation=true` | **Denied** |
-| `jayson-storefront` | `dev-amaraii/projects-ext-jayson-online-shop`, definition `b5a41026-8298-4976-956b-49fbca6de695` | `feat/storefront-demo` | `validation`, `preview_qa` | Separately authorized, exact SHA-pinned preview release only |
-
-CircleCI project slugs are pinned in `src/index.mjs`, never supplied by an agent. A standard `trigger` **cannot** pass arbitrary pipeline parameters or request a release. For AmaraiiOS, no release parameter exists and `release` is explicitly rejected. Never assume passing CircleCI validation implies production payment, migrations, hosted acceptance or deployment approval.
-
-## Request/response protocol
-
-JSON is stored **only** in KV `requests/<UUID>`. Sample validation request (do not reuse this sample ID or timestamp):
+`POST /accounts/{account_id}/queues/{queue_id}/messages`
 
 ```json
-{"v":1,"id":"<FRESH-UUID>","action":"trigger","project":"amaraii-os","branch":"codex/p2-live-billing-pilot","mode":"validation","approved":true,"requestedAt":"<CURRENT-ISO-UTC>"}
+{
+  "content_type": "json",
+  "body": {
+    "v": 1,
+    "id": "<fresh UUID>",
+    "action": "trigger",
+    "project": "amaraii-os",
+    "branch": "development",
+    "mode": "validation",
+    "requestedAt": "<current ISO UTC timestamp>",
+    "approved": true
+  }
+}
 ```
 
-Common fields: `v:1`, `id` (same as KV key suffix), `project`, `action`, `approved:true`, `requestedAt`. Required action-specific fields:
+Use the known Queue ID above. A successful Queue submission means accepted for delivery, not a completed test. Keep the command UUID. Messages are processed as they arrive: batch size 1, wait 0, concurrency 1, max retries 0. There are no Cron schedules and no idle KV list calls. **Writing `requests/<UUID>` in KV alone no longer executes anything.** Legacy `processOne()` remains only as a tested migration helper and has no registered timer.
+
+Read the result through:
+
+`POST /accounts/{account_id}/storage/kv/namespaces/{namespace_id}/bulk/get`
+
+```json
+{"keys":["results/<same UUID>"],"type":"json"}
+```
+
+Read `result.values["results/<UUID>"]` with a bounded wait during the active task. KV propagation may delay visibility. No unattended polling or recurring check is needed. Results are `{id,status:"success",action,updatedAt,outcome}` or `{id,status:"error",action,updatedAt,error}`. Only the Worker writes `claims/` and `results/`; they expire after seven days.
+
+If delivery/result is uncertain, never automatically retry a trigger/release or mint another UUID. Reconcile using read-only `audit`/`inspect` first. Claims are best effort because KV is eventually consistent, not atomic exactly-once. Zero retries reduces paid replay risk; a terminated invocation can leave only a claim or no result, requiring operator reconciliation.
+
+## Project registry and commands
+
+| Project | Branches | QA modes | Release |
+| --- | --- | --- | --- |
+| `amaraii-os` | `development`, `staging`, `codex/p2-live-billing-pilot` | `validation` | Denied |
+| `jayson-storefront` | `feat/storefront-demo` | `validation`, `preview_qa` | Separately approved full-SHA preview only |
+
+Definition IDs and project slugs are pinned in source. No caller-supplied API URL, shell command or arbitrary pipeline parameter is accepted. Native GitHub `run-ci` label-added validation remains an option for AmaraiiOS feature PRs outside the bridge's branch allowlist; verify the exact current PR SHA.
 
 | Action | Additional fields | Result / notes |
 | --- | --- | --- |
@@ -50,99 +68,22 @@ Common fields: `v:1`, `id` (same as KV key suffix), `project`, `action`, `approv
 | `probe` | none | Unauthenticated network probes; no CircleCI token |
 | `release` | `branch`, `commitSha` (40 hex) | **Jayson only**, separately approved and QA-gated. Never use for AmaraiiOS |
 
-Result key is `results/<UUID>`, structure `{id,status:"success",action,updatedAt,outcome}` or `{id,status:"error",action,updatedAt,error}`. Worker uses `claims/<UUID>` before external calls and retains claim/result up to **7 days**. KV is eventually consistent; claims are best effort **not exactly-once**. If trigger status is uncertain, **read only** with `audit`/`inspect`; never blindly enqueue the same or a new trigger to retry.
+| `artifact_preview` | `pipelineId`, `jobId`, `jobNumber`, `artifactPath` | Owned AmaraiiOS QA PNG bytes; see below |
 
-### Default agent recipe: native GitHub → CircleCI on demand (approved)
+A validation request creates a pipeline, not a passing test. Follow with `inspect`, verify final workflow/job outcomes and the exact revision. For failed steps use `job_steps` with the owned pipeline/job identities. Validation and screenshots do not prove hosted UAT, payment, database migration or deployment acceptance.
 
-1. Read the target app's `AGENTS.md` and native `.circleci/config.yml`, current NEN Context OS decision and current PR state. Distinguish source validation from UAT, hosted integration, migrations, payments and releases.
-2. Read the PR's current **head SHA** and its exact `ci/circleci: validate` commit status through connected GitHub tools. Never pass an older green SHA off as validation of a changed revision.
-3. When a run is explicitly requested and still needed, use GitHub's `run-ci` **label-added event** to invoke the CircleCI GitHub App trigger. If the label is already present, remove and re-add it **only** for a deliberately requested fresh run. Each run can use CircleCI credits; all-push auto triggers remain disabled.
-4. Read the commit status for the **same current SHA** and follow its CircleCI workflow/job URL only when needed. Do not set up storage polling or unattended status checks. GitHub commit statuses do not themselves expose detailed CircleCI step logs; consult the linked job page before considering a new read-only connector.
-5. Record exact SHA, tests and state. A successful label event, pipeline creation or historical status does not mean the new commit passed or that production is ready.
+## Screenshot preview
 
-Historical proof: [AmaraiiOS Games PR #8](https://github.com/dev-amaraii/amaraii-os/pull/8), SHA `adf2480ee9867acbc1f903a42a7c395cc872715f`, reported `ci/circleci: validate = success` on 21 October 2026; verify anew for any later revision.
+Send an `artifact_preview` command with the standard identity/time/approval fields, `project:"amaraii-os"`, exact pipeline UUID, job UUID, job number, and exact artifact path listed by `inspect`. Permitted paths end in `.png` under `nen-customer-operations-qa/`, `bank-transfer-qa/`, or `qa-intel/transactions/`. Path traversal, arbitrary URLs and cross-project jobs are denied. Downloads are capped at **900,000 bytes** and checked for PNG signature and MIME. CircleCI credentials and signed download URLs are never returned by the preview operation. Only allowed HTTPS origins/redirects are followed; S3 receives no CircleCI token.
 
+Success includes `outcome:{path,jobNumber,mediaType:"image/png",bytes,dataBase64}`. Decode the base64 into a local PNG and inspect it with the image viewer. Keep private image bytes out of logs/Notion/PR descriptions. The current preview supports PNG screenshots; `inspect` lists other report artifacts but does not return their contents. CI cannot retrieve artifacts that failed jobs never uploaded.
 
-### Proposed read-only UI artifact preview (24 October 2026; not yet deployed)
+## Jayson release
 
-A narrowly scoped capability implemented on branch `codex/ci-artifact-preview-20261024`.
-It remains **candidate source**, not proof of the active Worker. Do not enqueue this
-action until the Worker is independently tested, deployed and verified.
+Keep Jayson `release` separate from QA. It requires `project:"jayson-storefront"`, `branch:"feat/storefront-demo"`, an explicitly approved lowercase 40-hex `commitSha` and standard fields. CircleCI receives only `run_preview_release:true` and `release_sha`. QA must pass before the deployment job receives restricted Pages credentials. Inspect both QA/deploy job outcomes, the exact revision, `preview-release/verified.json` and the Pages deployment before claiming release success. Do not issue a release as a bridge smoke test.
 
-CircleCI supports `GET /api/v2/project/{project-slug}/{job-number}/artifacts`
-and authenticated retrieval of an individual listed artifact. Ordinary `inspect`
-already returns artifact path metadata. The new `artifact_preview` action retrieves
-the bytes for **one explicitly selected disposable NEN QA PNG** and stores a
-base64-encoded response in the existing private `results/<UUID>` KV slot:
+## Deployment and rollback
 
-```json
-{
-  "v": 1,
-  "id": "<fresh UUID matching requests/<UUID>>",
-  "action": "artifact_preview",
-  "project": "amaraii-os",
-  "pipelineId": "<confirmed CircleCI pipeline UUID>",
-  "jobId": "<confirmed CircleCI job UUID>",
-  "jobNumber": 49,
-  "artifactPath": "nen-customer-operations-qa/customer-pending-light-1440.png",
-  "requestedAt": "<current ISO UTC timestamp>",
-  "approved": true
-}
-```
+Run `node --test tests/*.test.mjs` from `bridge/`. Inspect live source before changing code. Upload a version retaining `secret_text` and `kv_namespace` bindings; verify it before activation. Verify active deployment, binding names/types, command consumer settings, empty schedules and disabled public URLs after deployment. Read [DEPLOYMENT-20261024.md](DEPLOYMENT-20261024.md).
 
-This is a **read-only operation**, not a pipeline trigger or deployment. The
-backend verifies the pipeline's pinned AmaraiiOS project, the job's membership in
-that pipeline, and an exact artifact path from the CircleCI artifact manifest.
-Allowed artifact prefixes: `nen-customer-operations-qa/`,
-`bank-transfer-qa/`, `qa-intel/transactions/`; only `.png`.
-Responses are capped at 900,000 binary bytes and checked for PNG signature and
-content type. CircleCI access credentials stay inside the Worker, and temporary
-artifact download URLs are **never returned**. Redirects are not followed unless
-the destination is an approved HTTPS artifact host. No public Worker endpoint,
-general-purpose proxy, new binding, background scanner or Cron change is added.
-The Jayson preview-release workflow remains unchanged and does not gain access
-to this preview operation.
-
-A successful result is shaped:
-`{id,status:"success",action:"artifact_preview",outcome:{path,jobNumber,mediaType:"image/png",bytes,dataBase64}}`.
-Decode `dataBase64` **only inside the authenticated operator session** and render
-the resulting image in the inspection tool; do not paste base64 screenshots or
-signed URLs into GitHub issues, chat transcripts, Cloudflare logs or Context OS.
-Artifacts may contain test data: use disposable/synthetic screenshots only.
-A failed CircleCI job can have **zero stored artifacts** if it failed before its
-`store_artifacts` steps. A screenshot artifact also does not establish
-authenticated production UI correctness.
-
-**Release gate:** execute `cd bridge && node --test tests/*.test.mjs` against
-the reviewed source; confirm the GitHub branch is reconciled with the actual
-active Worker version; stage a Worker version preserving `CIRCLE_TOKEN`
-`secret_text` and `QUEUE` KV bindings; verify staged bindings and version;
-then, after approval, activate and smoke-test a read-only preview against an
-existing disposable CircleCI job. Preserve and test rollback to the previous
-active version. Never update the Worker based on a stale GitHub mirror.
-
-
-### Legacy private KV recipe: explicit fallback / Jayson gated preview release only
-
-Use only when the needed capability **cannot** be completed with GitHub and the specific action is explicitly authorized. The Jayson SHA-pinned preview release remains separately protected; AmaraiiOS `run-ci` is **not** a Jayson release trigger.
-
-1. Verify the *live* Cloudflare account, `nen-ci-bridge` active Worker version, Cron and binding names/types. Follow the hardcoded allowlists; `approved:true` is not a substitute for authenticated access.
-2. Using the authorized Cloudflare API tool, enqueue a single fresh UUID+timestamp command at `requests/<UUID>` with the documented request protocol. Do not expose a public Worker trigger.
-3. For **this explicit command only**, read `results/<UUID>` with bounded attempts that account for five-minute pickup and the 30-minute command age; never run a continuous background poller. Treat a returned pipeline ID as acceptance, **not** a successful test or release.
-4. If needed, send separately authorized read-only `inspect`/`job_steps` commands and verify actual CircleCI identity, current SHA, QA/workflow outcome and release artifact. For uncertain paid triggers, reconcile with `audit`/`inspect`; do **not** blindly retry.
-5. Do not disable Cron/delete KV until **all** remaining users, including Jayson exact-`release_sha`, QA gates, restricted deploy credentials and recovery path, have a reviewed, proven on-demand replacement.
-
-### Safety, rollout and recovery
-
-- This private Worker has **no HTTP commands**, does not expose token values, does not accept arbitrary URLs, and does not run shell commands. `approved:true` **is not an authentication mechanism**: actual authorization is Cloudflare API credentials and the Worker allowlist. Keep the Cloudflare connection least privilege.
-- Reconcile this file and tested source changes **in GitHub before redeploying**. Do not overwrite Cloudflare with stale branch code. To update, use Cloudflare Versions API to stage a new module version, preserving the existing `CIRCLE_TOKEN` `secret_text` and `QUEUE` `kv_namespace` bindings; inspect staged version before explicit percentage deployment. Recheck active deployment, Cron, subdomain disabled and `health`.
-- If deploy breaks CI, use the previous **known-good version** from the deployments API, with deliberate rollback and binding checks; do not blindly redeploy latest. Never edit/write the secret value.
-- No background monitoring or continuous polling by ChatGPT is implicit. Native GitHub CI is requested and checked **on demand**; legacy KV requests are processed by a **temporary** five-minute Cron and incur queue pickup delay, finite retention and possible CircleCI credits. Never disable Cron until its remaining consumers have tested alternatives.
-- NEN Context OS canonical remote CI standard: https://app.notion.com/p/3fffa5e3c90581ceab86f62e1b1fb5a5
-- NEN CI handoff: https://app.notion.com/p/3fefa5e3c90581f2a932c140fb432d4e
-
-## Proven evidence (historical checkpoint)
-
-- **AmaraiiOS**: CircleCI [pipeline #4](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw/4), commit `542dbfc37dc953ed97d8a8c6b0fb30ea80e01284`, validated on 20 October 2026: frozen pnpm install, repository typecheck, API tests, and build all passed. No release was requested.
-- **Jayson storefront**: CircleCI [pipeline #11](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/CRNFjZzLKeZdypYW5EWkyL/11) passed QA and a separately approved preview release. It is not real e-commerce production.
-- All historical IDs and statuses must be rechecked for current work. Do not mistake a previously green SHA for a newly modified branch HEAD.
+If the new runtime fails, pause/remove the Queue consumer before changing deployments. The pre-change version `332c29dd-5363-4626-a18f-fb0575ae32da` is a rollback checkpoint for source/secrets but has no Queue handler; restoring it alone does not restore on-demand operation. Keep Cron disabled unless the owner explicitly requests temporary polling. Reconcile any in-flight paid requests read-only before retrying. Preserve KV and encrypted secrets throughout.
