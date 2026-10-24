@@ -1,29 +1,16 @@
-# Agent start here — NEN remote CI / CircleCI repository
+# NEN remote CI bridge — agents start here
 
-**Ownership:** NEN International only. Read the [NEN Context OS — Remote CI/CD Standard](https://app.notion.com/p/3fffa5e3c90581ceab86f62e1b1fb5a5) for the latest accepted decisions and verified operational state. See [issue #4](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/issues/4) for capability-gap tracking. Do not sync or copy this context to Personal Context OS.
+Owner: **NEN International only**. Read [NEN Context OS](https://app.notion.com/p/3fffa5e3c90581ceab86f62e1b1fb5a5) and [bridge/OPERATIONS.md](bridge/OPERATIONS.md). Do not copy this context to Personal Context OS.
 
-## Accepted decision: GitHub first (22 October 2026)
+## Accepted direction — 24 October 2026
 
-- **Default for AmaraiiOS tests:** use native connected GitHub tools and the CircleCI GitHub App's `run-ci` **label-added PR trigger**, then inspect the `ci/circleci: validate` status and CircleCI job URL **for the exact current PR head SHA**.
-- Before spending CircleCI credits, verify whether the current SHA already has a relevant completed CI result; do not treat a green check on an earlier SHA as proof. A new `run-ci` label-added event (remove then re-add an existing label) must be intentional, never a timer, push-trigger or automatic retry.
-- **Do not implement** a new Cloudflare API, Queue, KV cache, background poller, general-purpose MCP gateway or proxy as a prerequisite. Prove a specific capability missing from GitHub and implement only the smallest approved fix. Full CircleCI step diagnostics are not provided by the GitHub commit-status connector; use the job link first.
-- CI validation is not permission to deploy, migrate data, switch billing on, or bypass hosted QA and UAT.
-- **Jayson Storefront preview release is separate:** it requires explicit approval, exact `release_sha`, QA-gated promotion and restricted deployment credentials. The AmaraiiOS `run-ci` label is not a release control.
+The owner requested that the existing bridge let agents retrieve QA artifacts and run tests on demand, and explicitly removed five-minute polling. This supersedes the 22 October restriction against a Queue for this bridge. Commands now arrive through the authenticated Cloudflare Queues API; results remain in the existing private KV. There is no public Worker command/download endpoint or scheduled consumer.
 
-## Repository and deployment identities: do not confuse them
-
-- This repository's **root `src/`, `wrangler.toml`, OAuth/MCP docs** are the earlier experimental `nen-circleci-mcp` design; status/deployment must be independently verified. Do not treat the root scaffold as the active CI execution bridge.
-- Private **`nen-ci-bridge`** source, tests and operator runbook are on branch [`feat/nen-ci-kv-bridge`](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/tree/feat/nen-ci-kv-bridge/bridge); matching 5-minute Cron source config and updated docs are in [draft PR #3](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/3) (`codex/reduce-ci-kv-idle-polling-20261021`). Read [bridge/AGENTS.md](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/blob/codex/reduce-ci-kv-idle-polling-20261021/bridge/AGENTS.md) and [bridge/OPERATIONS.md](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/blob/codex/reduce-ci-kv-idle-polling-20261021/bridge/OPERATIONS.md) before touching that Worker.
-- **Last verified live on 22 October 2026:** `nen-ci-bridge` version `332c29dd-5363-4626-a18f-fb0575ae32da`, private KV+Cron, scheduled `*/5 * * * *` after a schedule-only change from one-minute polling (theoretical 288 idle KV list calls/day). `CIRCLE_TOKEN` is a `secret_text` binding and `QUEUE` is a `kv_namespace` binding. This is **temporary**; it is not a zero-polling deployment.
-- **Do not disable the live Cron, delete KV, redeploy an unverified source mirror or expand authorization** until all consumers — especially the Jayson QA-gated release — have a tested, approved replacement. A GitHub branch/config is not proof of the active Cloudflare version or schedule.
-
-## Working rules for any agent
-
-1. Fetch current NEN Context OS and GitHub branch/PR HEAD. Categorize facts, accepted decisions, proposals and unverified claims separately.
-2. Prefer GitHub-native on-demand tests; check commit statuses per SHA. Never trigger paid workflows without an explicit purpose/approval.
-3. For missing functions, document concrete blocked agent operation and cheapest solution before writing runtime code.
-4. Keep credentials in secret stores. Never read, export, commit, print or rotate the CircleCI token or Cloudflare deploy token; never expose an unauthenticated mutating HTTP endpoint or generic release label.
-5. Keep changes reviewable. Run relevant tests before claiming passing code. Do not deploy infrastructure or adjust production/billing from documentation-only tasks.
-6. Update NEN Context OS and issue #4 only with verified changes and clearly marked remaining gaps.
-
-**Scope note:** These instructions describe the NEN bridge project as of 22 October 2026. Re-verify live configuration for later operations; historical CI successes are not current-SHA proof.
+- Use [bridge/OPERATIONS.md](bridge/OPERATIONS.md) for the exact request protocol and deployed evidence. Writing a KV `requests/` key alone no longer invokes the Worker.
+- Agents may request on-demand QA within the user's requested work. Verify the current branch/HEAD and existing CI evidence first; avoid duplicate paid runs. No automatic push/PR/timer triggers or unattended status polling.
+- Native GitHub `run-ci` label-added validation remains available for AmaraiiOS feature PRs. The bridge's trigger branches are separately allowlisted; do not broaden them or infer that the feature PR is covered by an older green SHA.
+- Jayson preview release still needs separate explicit approval, its exact 40-character SHA, QA gates and restricted deployment credentials. Ordinary validation cannot deploy. AmaraiiOS release remains denied.
+- Credentials stay in encrypted Worker/CircleCI secrets. Never print, export, replace or put them in code, chat, KV or Context OS. Preserve secret/KV bindings during version upload.
+- The root OAuth/MCP scaffold (`nen-circleci-mcp`) is a separate historical experiment. Modify only `bridge/` for the active `nen-ci-bridge`.
+- For bridge changes run `cd bridge && node --test tests/*.test.mjs`. Inspect active Worker/version, bindings, queue consumer, schedules and private URL settings after deployment. Source commits and uploaded inactive versions are not live proof.
+- Record verified outcomes in NEN Context OS and [issue #4](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/issues/4). Validation, UI screenshots and source checks do not establish hosted UAT, migrations, payment readiness or deployment acceptance.
