@@ -25,11 +25,19 @@ The NEN bridge supports an explicit `qa_intel` mode and an exact path-only `arti
 - **Still open:** independent reviewer acceptance against the approved product criteria; mobile accessibility/viewport testing; authenticated tenant/role/permission business flows that are not implemented in Phase 0; native Node 24 bridge regression job (previously tested in an isolated JS harness, not native CircleCI).
 - This live QA run verifies only implemented Phase 0 guest-auth acceptance. It must not be described as ChurchPro MVP complete or broadly product accepted.
 
+## Follow-up verification — expanded Phase 0 QA and native Node proof
+
+- ChurchPro [CircleCI #5](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu/5) on `658e2ecf826eda48d917054ac840317f75734e2d` successfully ran 10 standard jobs and the opt-in QA job. The private `artifact_report` verified **5/5 approved guest-only acceptance checks passed** (two QA-Intel Gherkin contracts; three supplemental Playwright checks for 320px/390px responsive layout, native empty-form validation, and uncaught browser exceptions). Both full-page mobile PNGs were privately previewed and visually examined without obvious layout overflow or clipping. This does not certify authenticated or future product workflows.
+- ChurchPro [CircleCI #6](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu/6) at temporary config SHA `28c0921b91ee35f6efc087faf3d8015af561ea7b` ran the **native Node 24.15** command `node --test tests/*.test.mjs` on the pinned bridge repository SHA `cfe60d93a95c2f20b261a210d9275adb297effe3`. CircleCI `job_steps` confirms the test step succeeded (exit 0); all 11 jobs were green. This is a real native Node regression execution, beyond the prior isolated V8 harness.
+- The **one-time** cross-repository step was removed from ChurchPro in `749059efaaf1a4c3aa2610da8db5611b69029842`. [CircleCI #7](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu/7) confirmed the permanent ten-job plus opt-in QA workflow still passes 11/11. A separate native test job remains defined in this bridge repository, but its own CircleCI project has not been confirmed configured.
+- A reviewer-facing independent QA evidence pack is now in [ChurchPro's Phase 0 handoff](https://github.com/dev-amaraii/ChurchPro/blob/circleci-project-setup/qa-intel/reviews/phase0-handoff-20261025.md). The implementing agent's own examination of screenshots is **not** independent product sign-off. The machine-readable `productAcceptance` field remains `pending_independent_qa_review`. ChurchPro [draft PR #5](https://github.com/dev-amaraii/ChurchPro/pull/5) and this [bridge PR #7](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/7) are open for review.
+- Cloudflare Worker deployment, security bindings, Queue, public URL and schedule settings were **not modified** during these QA evidence runs.
+
 ## Outstanding gates
 
 - **Resolved:** ChurchPro QA-Intel pipeline #4 was manually triggered and both workflows passed; handoff JSON and guest screenshot were verified through the private bridge.
 - Maintain an independent QA-review verdict separate from CI green. Current handoff explicitly leaves product acceptance pending, and Phase 1+ workflows are deferred, not passed.
-- Run the native Node 24 bridge CircleCI job. PR #7 is draft and its source has not been merged into `main`. Avoid redeploying older main.
+- **Native Node 24 test proof completed via pinned source in CircleCI #6**. A dedicated bridge-repository CircleCI project remains unverified; PR #7 is draft and not merged into `main`. Avoid redeploying older main.
 - Future independent QA reviews must use approved ChurchPro product requirements, not screenshots alone, and must explicitly distinguish current implemented behavior from deferred functionality.
 
 See [bridge/OPERATIONS.md](OPERATIONS.md) for private on-demand command protocol and [ChurchPro QA agent workflow](https://github.com/dev-amaraii/ChurchPro/blob/circleci-project-setup/docs/quality/qa-intel-agent-workflow.md).
