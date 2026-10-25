@@ -17,8 +17,14 @@ const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
 
 const IMAGE_ARTIFACT_MAX_BYTES = 900000;
+const REPORT_ARTIFACT_MAX_BYTES = 65536;
+const CHURCHPRO_QA_REPORT = 'qa-intel/churchpro/agent-handoff.json';
 // Only disposable NEN QA screenshots, never an arbitrary CircleCI artifact or URL.
-const NEN_QA_IMAGE = /^(?:nen-customer-operations-qa|bank-transfer-qa|qa-intel\/transactions)\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/;
+// A screenshot is readable only within its explicitly registered project's QA prefix.
+const QA_IMAGE_PATHS = Object.freeze({
+  'amaraii-os': /^(?:nen-customer-operations-qa|bank-transfer-qa|qa-intel\/transactions)\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
+  churchpro: /^qa-intel\/churchpro\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
+});
 
 function artifactHostAllowed(url) {
   const h = url.hostname.toLowerCase();
@@ -79,7 +85,81 @@ async function downloadQaImage(env, urlValue, requestFn = fetch) {
 }
 
 
+// Fetch one strictly scoped QA handoff without forwarding arbitrary CI content.
+// Do not return signed links, raw logs, member records or unreviewed JSON keys.
+async function downloadChurchproReport(env, urlValue, requestFn = fetch) {
+  let url;
+  try { url = new URL(urlValue); } catch { throw new Error('Unsafe artifact URL'); }
+  for (let redirects=0; redirects<3; redirects++) {
+    if (!artifactHostAllowed(url)) throw new Error('Unsafe artifact URL');
+    const trusted = url.hostname === 'circleci.com' ||
+      url.hostname === 'circle-artifacts.com' || url.hostname.endsWith('.circle-artifacts.com');
+    const response = await requestFn(url.toString(), {method:'GET',redirect:'manual',
+      headers: trusted ? {'Circle-Token':env.CIRCLE_TOKEN,Accept:'application/json'} : {Accept:'application/json'}});
+    if ([301,302,303,307,308].includes(response.status)) {
+      const location=response.headers.get('location');
+      if (!location) throw new Error('Artifact download failed');
+      url=new URL(location,url);
+      continue;
+    }
+    if (!response.ok || !response.body) throw new Error('Artifact download failed');
+    const type=response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+    if (type && !['application/json','application/octet-stream','text/plain'].includes(type))
+      throw new Error('Artifact format not supported');
+    const length=Number(response.headers.get('content-length') || 0);
+    if (!Number.isFinite(length) || length>REPORT_ARTIFACT_MAX_BYTES)
+      throw new Error('Artifact too large');
+    const reader=response.body.getReader(), chunks=[];
+    let count=0;
+    for (;;) {
+      const {value,done}=await reader.read();
+      if (done) break;
+      count+=value.byteLength;
+      if (count>REPORT_ARTIFACT_MAX_BYTES) {
+        await reader.cancel(); throw new Error('Artifact too large');
+      }
+      chunks.push(value);
+    }
+    if (!count) throw new Error('Artifact download failed');
+    const bytes=new Uint8Array(count);let offset=0;
+    for (const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    let report;
+    try { report=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes)); }
+    catch { throw new Error('Invalid QA handoff JSON'); }
+    if (!isPlainObject(report) || report.schemaVersion!==1 || report.product!=='ChurchPro' ||
+        !['passed','failed'].includes(report.evidenceStatus) ||
+        report.productAcceptance!=='pending_independent_qa_review' ||
+        !Array.isArray(report.checks) || report.checks.length===0 || report.checks.length>32)
+      throw new Error('Invalid QA handoff schema');
+    const checks=report.checks.map(item=>{
+      if (!isPlainObject(item) || typeof item.intent!=='string' ||
+          !/^[a-z0-9_]{1,100}$/.test(item.intent) ||
+          !['passed','failed','not_executed'].includes(item.status))
+        throw new Error('Invalid QA handoff contract');
+      return {intent:item.intent,status:item.status,
+        failureLayer:['ui','api','business','test'].includes(item.failureLayer)
+          ? item.failureLayer:null};
+    });
+    const revision=typeof report.revision==='string' && COMMIT_SHA.test(report.revision)
+      ? report.revision : null;
+    return {schemaVersion:1,project:'churchpro',revision,
+      evidenceStatus:report.evidenceStatus,
+      productAcceptance:'pending_independent_qa_review',checks};
+  }
+  throw new Error('Artifact download failed');
+}
+
 export const PROJECTS = Object.freeze({
+  churchpro: Object.freeze({
+    slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu',
+    // Resolve the existing GitHub App definition by identity; never guess an ID.
+    definitionName: 'build-and-test',
+    configPath: '.circleci/config.yml',
+    repository: 'dev-amaraii/ChurchPro',
+    branches: ['circleci-project-setup'],
+    // ChurchPro's current CircleCI config has no pipeline parameters.
+    modes: Object.freeze({validation: null, qa_intel: 'run_qa_intel'}),
+  }),
   'amaraii-os': Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw',
     definitionId: 'c4c6aad9-03c1-4e9e-99ca-cd650deda730',
@@ -155,13 +235,25 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Recent command has unexpected fields');
     return { command, project };
   }
+  if (command.action === 'artifact_report') {
+    if (command.project !== 'churchpro' || !Number.isSafeInteger(command.jobNumber) ||
+        command.jobNumber<1 || command.jobNumber>999999 ||
+        typeof command.jobId!=='string' || !UUID.test(command.jobId) ||
+        typeof command.pipelineId!=='string' || !UUID.test(command.pipelineId) ||
+        command.artifactPath!==CHURCHPRO_QA_REPORT ||
+        command.branch!==undefined || command.mode!==undefined ||
+        command.commitSha!==undefined || command.startNumber!==undefined) {
+      throw new Error('Artifact report not permitted');
+    }
+    return {command,project};
+  }
   if (command.action === 'artifact_preview') {
-    if (command.project !== 'amaraii-os' || !Number.isSafeInteger(command.jobNumber) ||
+    if (!QA_IMAGE_PATHS[command.project] || !Number.isSafeInteger(command.jobNumber) ||
         command.jobNumber < 1 || command.jobNumber > 999999 ||
         typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
         typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
         typeof command.artifactPath !== 'string' || command.artifactPath.length > 240 ||
-        !NEN_QA_IMAGE.test(command.artifactPath) || command.artifactPath.includes('..') ||
+        !QA_IMAGE_PATHS[command.project].test(command.artifactPath) || command.artifactPath.includes('..') ||
         command.branch !== undefined || command.mode !== undefined || command.commitSha !== undefined ||
         command.startNumber !== undefined) {
       throw new Error('Artifact preview not permitted');
@@ -219,6 +311,27 @@ async function circleV3Request(env, path, requestFn = fetch) {
   return res.json();
 }
 
+// CircleCI provides a read-only project/definition API for GitHub App projects.
+// Resolve only one exact name + config path + repository match before triggering.
+async function resolveDefinitionId(env, project, requestFn) {
+  if (project.definitionId) return project.definitionId;
+  const details = await circleRequest(env, '/project/' + project.slug, undefined, requestFn);
+  if (details.slug !== project.slug || !UUID.test(details.id || '')) {
+    throw new Error('CircleCI project identity mismatch');
+  }
+  const definitions = await circleRequest(env,
+    '/projects/' + details.id + '/pipeline-definitions', undefined, requestFn);
+  const matches = (Array.isArray(definitions.items) ? definitions.items : []).filter(item =>
+    item.name === project.definitionName &&
+    item.config_source?.provider === 'github_app' &&
+    item.config_source?.file_path === project.configPath &&
+    typeof item.config_source?.repo?.full_name === 'string' &&
+    item.config_source.repo.full_name.toLowerCase() === project.repository.toLowerCase() &&
+    UUID.test(item.id || ''));
+  if (matches.length !== 1) throw new Error('Approved CircleCI pipeline definition not found uniquely');
+  return matches[0].id;
+}
+
 export async function executeCommand(env, command, project, requestFn = fetch) {
   if (command.action === 'health') {
     return {
@@ -232,10 +345,12 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
   }
   if (command.action === 'trigger') {
     const body = {
-      definition_id: project.definitionId,
+      definition_id: await resolveDefinitionId(env, project, requestFn),
       config: { branch: command.branch },
       checkout: { branch: command.branch },
-      parameters: { [project.modes[command.mode]]: true },
+      ...(project.modes[command.mode]
+        ? { parameters: { [project.modes[command.mode]]: true } }
+        : {}),
     };
     const data = await circleRequest(env, '/project/' + project.slug + '/pipeline/run', body, requestFn);
     if (!UUID.test(data.id || '')) throw new Error('CircleCI response missing pipeline ID');
@@ -316,7 +431,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         .map(p => ({ id: p.id, number: p.number, state: p.state, createdAt: p.created_at, revision: p.vcs?.revision, errors: (p.errors || []).slice(0,3).map(e=>({type:e.type})) })),
     };
   }
-  if (command.action === 'artifact_preview') {
+  if (command.action === 'artifact_preview' || command.action === 'artifact_report') {
     const pipeline = await circleRequest(env,'/pipeline/'+command.pipelineId,undefined,requestFn);
     if (pipeline.project_slug !== project.slug) throw new Error('Pipeline project mismatch');
     const workflows = await circleRequest(env,'/pipeline/'+command.pipelineId+'/workflow',undefined,requestFn);
@@ -342,6 +457,10 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
       if (!token) break;
     }
     if (!found || typeof found.url!=='string') throw new Error('Artifact not found');
+    if (command.action === 'artifact_report') {
+      const report=await downloadChurchproReport(env,found.url,requestFn);
+      return {path:command.artifactPath,jobNumber:command.jobNumber,...report};
+    }
     const preview=await downloadQaImage(env,found.url,requestFn);
     // The URL (which can be short-lived or signed) must never be returned.
     return {path:command.artifactPath,jobNumber:command.jobNumber,...preview};
@@ -396,7 +515,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           revisionMismatch:raw.includes('revision mismatch') || raw.includes('Expected release SHA does not match'),
           missingArtifact:raw.includes('missing release artifact') || raw.includes('No such file or directory'),
           permissionDenied:raw.includes('permission denied') || raw.includes('Permission denied'),
-          typescriptErrors: command.project === 'amaraii-os'
+          typescriptErrors: ['amaraii-os','churchpro'].includes(command.project)
             ? (raw.match(/[^\r\n]*error TS[0-9]{4}:[^\r\n]*/g) || [])
                 .slice(0,16).map(line => line.replace(/\x1b\[[0-9;]*m/g,'')
                   .replace(/sk_(?:live|test)_[A-Za-z0-9]+/g,'[REDACTED]').slice(0,240))
@@ -494,7 +613,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         if (job.job_number && job.status && ['success','failed','failing','error'].includes(job.status)) {
           try {
             const artifacts = await circleRequest(env, '/project/' + project.slug + '/' + job.job_number + '/artifacts', undefined, requestFn);
-            summary.artifacts = (artifacts.items || []).slice(0, 40).map(a => ({ path: a.path, url: a.url }));
+            summary.artifacts = (artifacts.items || []).slice(0, 40).map(a => ({ path: a.path }));
           } catch { summary.artifactsUnavailable = true; }
         }
         jobs.push(summary);

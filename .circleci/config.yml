@@ -1,0 +1,18 @@
+# Native regression suite for the private on-demand NEN CI bridge.
+# No credentials, browser, database, timers or deployment are required.
+version: 2.1
+
+jobs:
+  bridge_native_tests:
+    docker:
+      - image: cimg/node:24.15
+    steps:
+      - checkout
+      - run:
+          name: Run all bridge contract tests on Node 24
+          command: node --test bridge/tests/*.test.mjs
+
+workflows:
+  verify:
+    jobs:
+      - bridge_native_tests
