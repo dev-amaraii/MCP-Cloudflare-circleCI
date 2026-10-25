@@ -31,6 +31,7 @@ Implementation review: [draft PR #7](https://github.com/dev-amaraii/MCP-Cloudfla
 2. Exactly one new `trigger` command `c96f654e-67bd-43fb-b6da-aa83f508d525` succeeded, creating ChurchPro CircleCI pipeline **#2**, UUID `5e4d409e-3f61-4b28-a905-8de242404518`, for branch `circleci-project-setup`. No optional pipeline parameters were sent.
 3. Private on-demand `inspect` command `6029d85b-699a-4711-8389-e6616f5615c3` reported workflow UUID `54a19aef-c178-49f9-80c1-6f6b2dc2537d`, name `verify`, status `success`, with **10/10 successful jobs**: `api`, `web`, `worker`, `database`, `infrastructure`, `shared`, `domain_identity`, `domain_tenancy`, `domain_authorization`, and `domain_audit`.
 4. Read-only post-deployment Cloudflare verification confirmed the same new active version, inherited bindings, unchanged Queue consumer, empty schedules and disabled public/preview URLs.
+5. Live private `job_steps` command `e12cdb4d-479c-4079-aeea-b8820fd3b654` for ChurchPro API job #17, UUID `f9303cc6-a9fb-4992-9f72-d91dca607de9`, returned `success`, job `succeeded` and detailed successful checkout, pnpm install, Docker setup, build, test and lint steps. Build/test/lint reported exit code 0. No raw log or signed URL was returned.
 
 [ChurchPro CircleCI pipeline #2](https://app.circleci.com/pipelines/circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu/2).
 
