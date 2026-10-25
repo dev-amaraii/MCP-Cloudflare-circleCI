@@ -6,8 +6,8 @@ The owner's 24 October instruction authorizes on-demand bridge test/artifact use
 
 - Submit a fresh UUID command through the Queue messages API, then read its private KV result with a bounded wait. Do not write KV `requests/` and expect execution. No scheduled polling or automatic retries.
 - Account API access is authorization; `approved:true` alone is not authentication. Honor user scope and distinguish on-demand QA from separately approved releases.
-- Preserve the pinned project/branch/mode registry. AmaraiiOS is validation-only. Jayson retains explicit exact-SHA, QA-gated preview release.
-- Artifact previews accept only owned AmaraiiOS QA PNGs under the documented prefixes, up to 900,000 bytes. Never accept caller URLs, return signed download URLs, or expose credentials. A CI screenshot is not interactive browser QA.
+- Preserve the pinned project/branch/mode registry. ChurchPro's exact `build-and-test` GitHub App pipeline definition is read-only-resolved from CircleCI and may not be replaced with an arbitrary definition. Its `validation` trigger intentionally has no pipeline parameters. AmaraiiOS is validation-only. Jayson retains explicit exact-SHA, QA-gated preview release.
+- Artifact previews accept only owned AmaraiiOS QA PNGs under the documented prefixes and owned ChurchPro QA PNGs under `qa-intel/churchpro/`, up to 900,000 bytes. Never accept caller URLs, return signed download URLs, or expose credentials. A CI screenshot is not interactive browser QA.
 - Queue consumer: batch size 1, concurrency 1, zero retries. Claims are written before external calls. KV is eventually consistent; this is best-effort duplicate suppression, **not exactly-once**. Reconcile uncertain triggers read-only before intentionally issuing a new request.
 - Never expose/print/export/replace `CIRCLE_TOKEN`. Verify inherited `secret_text` and `kv_namespace` bindings on the staged version and active deployment.
 - Run `node --test tests/*.test.mjs` from this folder before deployment. Preserve a known rollback version. Do not reactivate Cron merely as rollback; restore an approved on-demand version or pause the queue consumer.
