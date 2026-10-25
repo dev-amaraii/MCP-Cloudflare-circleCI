@@ -53,7 +53,7 @@ If delivery/result is uncertain, never automatically retry a trigger/release or 
 | --- | --- | --- | --- |
 | `amaraii-os` | `development`, `staging`, `codex/p2-live-billing-pilot` | `validation` | Denied |
 | `jayson-storefront` | `feat/storefront-demo` | `validation`, `preview_qa` | Separately approved full-SHA preview only |
-| `churchpro` | `circleci-project-setup` | `validation` | Denied |
+| `churchpro` | `circleci-project-setup` | `validation`, `qa_intel` | Denied |
 
 AmaraiiOS/Jayson definition IDs and all project slugs are pinned in source. ChurchPro discovers its existing `build-and-test` definition using the authenticated CircleCI read-only project/definitions API, requiring an exact `dev-amaraii/ChurchPro` repository and `.circleci/config.yml` path match before a trigger. No caller-supplied API URL, shell command or arbitrary pipeline parameter is accepted. Native GitHub `run-ci` label-added validation remains an option for AmaraiiOS feature PRs outside the bridge's branch allowlist; verify the exact current PR SHA.
 
@@ -71,7 +71,7 @@ AmaraiiOS/Jayson definition IDs and all project slugs are pinned in source. Chur
 
 | `artifact_preview` | `pipelineId`, `jobId`, `jobNumber`, `artifactPath` | Owned AmaraiiOS or ChurchPro QA PNG bytes, each under its project-specific prefix; see below |
 
-A ChurchPro `validation` request sends no pipeline parameters because its existing CircleCI `verify` workflow runs unconditionally. Keep the ChurchPro branch allowlist to `circleci-project-setup` until another branch includes the validated config; do not implicitly enable `main`.
+A ChurchPro `validation` request sends no pipeline parameters because its existing CircleCI `verify` workflow runs unconditionally. `qa_intel` is a deliberate second mode that sends only `run_qa_intel:true`, enabling ChurchPro's independent Phase 0 QA-Intel acceptance workflow; the ordinary ten-job `verify` still runs. The QA job emits a machine-readable agent handoff with product acceptance pending independent QA review. It is not an autonomous approval. Keep the ChurchPro branch allowlist to `circleci-project-setup` until another branch includes the validated config; do not implicitly enable `main`.
 
 A validation request creates a pipeline, not a passing test. Follow with `inspect`, verify final workflow/job outcomes and the exact revision. For failed steps use `job_steps` with the owned pipeline/job identities. Validation and screenshots do not prove hosted UAT, payment, database migration or deployment acceptance.
 
