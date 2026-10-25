@@ -1,6 +1,6 @@
 # NEN private on-demand CircleCI bridge
 
-The existing `nen-ci-bridge` accepts authenticated Cloudflare Queue messages, invokes allowlisted CircleCI operations, and stores results in private KV. It has no scheduled polling or public command/download endpoint.
+The existing `nen-ci-bridge` accepts authenticated Cloudflare Queue messages, invokes allowlisted CircleCI operations, and stores results in private KV. The staged ChurchPro extension adds parameter-free validation for its existing `build-and-test` CircleCI pipeline and scoped `qa-intel/churchpro/` PNG retrieval. No ChurchPro QA screenshots are available until a job explicitly uploads them. It has no scheduled polling or public command/download endpoint.
 
 ```text
 Agent → authenticated Cloudflare Queue messages API
@@ -9,6 +9,8 @@ Agent → authenticated Cloudflare Queue messages API
 ```
 
 The owner approved on-demand test/artifact use and removal of the five-minute timer on 24 October 2026. The Queue replaces scheduled KV mailbox pickup; `QUEUE` remains the name of the existing KV binding. Ordinary validation cannot deploy. Jayson preview release keeps its separate explicit approval, exact commit, QA and restricted-secret gates.
+
+ChurchPro onboarding changes must pass `node --test tests/*.test.mjs` before deployment; source changes on a GitHub branch do not automatically change the live Worker.
 
 Read [OPERATIONS.md](OPERATIONS.md) for the agent protocol, [AGENTS.md](AGENTS.md) for safeguards, and [DEPLOYMENT-20261024.md](DEPLOYMENT-20261024.md) for verified release evidence. Root OAuth/MCP code is a separate historical experiment.
 
