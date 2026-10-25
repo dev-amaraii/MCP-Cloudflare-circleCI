@@ -18,7 +18,11 @@ const COMMIT_SHA = /^[a-f0-9]{40}$/;
 
 const IMAGE_ARTIFACT_MAX_BYTES = 900000;
 // Only disposable NEN QA screenshots, never an arbitrary CircleCI artifact or URL.
-const NEN_QA_IMAGE = /^(?:nen-customer-operations-qa|bank-transfer-qa|qa-intel\/transactions)\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/;
+// A screenshot is readable only within its explicitly registered project's QA prefix.
+const QA_IMAGE_PATHS = Object.freeze({
+  'amaraii-os': /^(?:nen-customer-operations-qa|bank-transfer-qa|qa-intel\/transactions)\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
+  churchpro: /^qa-intel\/churchpro\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
+});
 
 function artifactHostAllowed(url) {
   const h = url.hostname.toLowerCase();
@@ -80,6 +84,16 @@ async function downloadQaImage(env, urlValue, requestFn = fetch) {
 
 
 export const PROJECTS = Object.freeze({
+  churchpro: Object.freeze({
+    slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu',
+    // Resolve the existing GitHub App definition by identity; never guess an ID.
+    definitionName: 'build-and-test',
+    configPath: '.circleci/config.yml',
+    repository: 'dev-amaraii/ChurchPro',
+    branches: ['circleci-project-setup'],
+    // ChurchPro's current CircleCI config has no pipeline parameters.
+    modes: Object.freeze({validation: null}),
+  }),
   'amaraii-os': Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw',
     definitionId: 'c4c6aad9-03c1-4e9e-99ca-cd650deda730',
@@ -156,12 +170,12 @@ export function validateCommand(command, keyId, now = Date.now()) {
     return { command, project };
   }
   if (command.action === 'artifact_preview') {
-    if (command.project !== 'amaraii-os' || !Number.isSafeInteger(command.jobNumber) ||
+    if (!QA_IMAGE_PATHS[command.project] || !Number.isSafeInteger(command.jobNumber) ||
         command.jobNumber < 1 || command.jobNumber > 999999 ||
         typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
         typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
         typeof command.artifactPath !== 'string' || command.artifactPath.length > 240 ||
-        !NEN_QA_IMAGE.test(command.artifactPath) || command.artifactPath.includes('..') ||
+        !QA_IMAGE_PATHS[command.project].test(command.artifactPath) || command.artifactPath.includes('..') ||
         command.branch !== undefined || command.mode !== undefined || command.commitSha !== undefined ||
         command.startNumber !== undefined) {
       throw new Error('Artifact preview not permitted');
@@ -219,6 +233,27 @@ async function circleV3Request(env, path, requestFn = fetch) {
   return res.json();
 }
 
+// CircleCI provides a read-only project/definition API for GitHub App projects.
+// Resolve only one exact name + config path + repository match before triggering.
+async function resolveDefinitionId(env, project, requestFn) {
+  if (project.definitionId) return project.definitionId;
+  const details = await circleRequest(env, '/project/' + project.slug, undefined, requestFn);
+  if (details.slug !== project.slug || !UUID.test(details.id || '')) {
+    throw new Error('CircleCI project identity mismatch');
+  }
+  const definitions = await circleRequest(env,
+    '/projects/' + details.id + '/pipeline-definitions', undefined, requestFn);
+  const matches = (Array.isArray(definitions.items) ? definitions.items : []).filter(item =>
+    item.name === project.definitionName &&
+    item.config_source?.provider === 'github_app' &&
+    item.config_source?.file_path === project.configPath &&
+    typeof item.config_source?.repo?.full_name === 'string' &&
+    item.config_source.repo.full_name.toLowerCase() === project.repository.toLowerCase() &&
+    UUID.test(item.id || ''));
+  if (matches.length !== 1) throw new Error('Approved CircleCI pipeline definition not found uniquely');
+  return matches[0].id;
+}
+
 export async function executeCommand(env, command, project, requestFn = fetch) {
   if (command.action === 'health') {
     return {
@@ -232,10 +267,12 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
   }
   if (command.action === 'trigger') {
     const body = {
-      definition_id: project.definitionId,
+      definition_id: await resolveDefinitionId(env, project, requestFn),
       config: { branch: command.branch },
       checkout: { branch: command.branch },
-      parameters: { [project.modes[command.mode]]: true },
+      ...(project.modes[command.mode]
+        ? { parameters: { [project.modes[command.mode]]: true } }
+        : {}),
     };
     const data = await circleRequest(env, '/project/' + project.slug + '/pipeline/run', body, requestFn);
     if (!UUID.test(data.id || '')) throw new Error('CircleCI response missing pipeline ID');
@@ -396,7 +433,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           revisionMismatch:raw.includes('revision mismatch') || raw.includes('Expected release SHA does not match'),
           missingArtifact:raw.includes('missing release artifact') || raw.includes('No such file or directory'),
           permissionDenied:raw.includes('permission denied') || raw.includes('Permission denied'),
-          typescriptErrors: command.project === 'amaraii-os'
+          typescriptErrors: ['amaraii-os','churchpro'].includes(command.project)
             ? (raw.match(/[^\r\n]*error TS[0-9]{4}:[^\r\n]*/g) || [])
                 .slice(0,16).map(line => line.replace(/\x1b\[[0-9;]*m/g,'')
                   .replace(/sk_(?:live|test)_[A-Za-z0-9]+/g,'[REDACTED]').slice(0,240))
