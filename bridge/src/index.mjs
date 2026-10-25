@@ -531,7 +531,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         if (job.job_number && job.status && ['success','failed','failing','error'].includes(job.status)) {
           try {
             const artifacts = await circleRequest(env, '/project/' + project.slug + '/' + job.job_number + '/artifacts', undefined, requestFn);
-            summary.artifacts = (artifacts.items || []).slice(0, 40).map(a => ({ path: a.path, url: a.url }));
+            summary.artifacts = (artifacts.items || []).slice(0, 40).map(a => ({ path: a.path }));
           } catch { summary.artifactsUnavailable = true; }
         }
         jobs.push(summary);
