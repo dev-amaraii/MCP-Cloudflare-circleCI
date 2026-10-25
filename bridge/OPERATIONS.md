@@ -70,6 +70,7 @@ AmaraiiOS/Jayson definition IDs and all project slugs are pinned in source. Chur
 | `release` | `branch`, `commitSha` (40 hex) | **Jayson only**, separately approved and QA-gated. Never use for AmaraiiOS |
 
 | `artifact_preview` | `pipelineId`, `jobId`, `jobNumber`, `artifactPath` | Owned AmaraiiOS or ChurchPro QA PNG bytes, each under its project-specific prefix; see below |
+| `artifact_report` | `pipelineId`, `jobId`, `jobNumber`, `artifactPath` | ChurchPro's owned, schema-checked QA agent handoff JSON summary only; see below |
 
 A ChurchPro `validation` request sends no pipeline parameters because its existing CircleCI `verify` workflow runs unconditionally. `qa_intel` is a deliberate second mode that sends only `run_qa_intel:true`, enabling ChurchPro's independent Phase 0 QA-Intel acceptance workflow; the ordinary ten-job `verify` still runs. The QA job emits a machine-readable agent handoff with product acceptance pending independent QA review. It is not an autonomous approval. Keep the ChurchPro branch allowlist to `circleci-project-setup` until another branch includes the validated config; do not implicitly enable `main`.
 
@@ -80,13 +81,19 @@ A validation request creates a pipeline, not a passing test. Follow with `inspec
 
 The existing ChurchPro CircleCI project slug is `circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu`, pipeline name `build-and-test`. The project is already configured in CircleCI and its first ten-job `verify` workflow succeeded on commit `2c0c96e97a662cfe658fa700e3260c2ac839a44a`. The bridge discovers its pipeline definition by exact name, GitHub repository, and config path using CircleCI's read-only API; do not hardcode or guess a definition ID. A standard `trigger` command requires `project:"churchpro"`, `mode:"validation"`, and `branch:"circleci-project-setup"`. Then use `inspect` with the returned pipeline UUID and, if needed, `job_steps` with owned job identifiers. A green historical workflow is not evidence of a new bridge-triggered run.
 
-No automatic release, `main` branch trigger, QA-Intel execution, browser screenshot capture, or cross-project artifact access is enabled. ChurchPro screenshots become previewable only after its CI configuration uploads owned PNG artifacts under `qa-intel/churchpro/`.
+No automatic release, `main` branch trigger or cross-project artifact access is enabled. ChurchPro now has a separate opt-in `qa_intel` mode; it runs implemented Phase 0 acceptance contracts and produces a machine-readable QA agent handoff. Future product journeys remain deferred, not passed. Uploaded screenshots remain restricted to `qa-intel/churchpro/`.
 
 ## Screenshot preview
 
 Send an `artifact_preview` command with the standard identity/time/approval fields, exact project, pipeline UUID, job UUID, job number, and exact artifact path listed by `inspect`. For `amaraii-os`, approved `.png` prefixes are `nen-customer-operations-qa/`, `bank-transfer-qa/`, and `qa-intel/transactions/`. For `churchpro`, only `qa-intel/churchpro/` PNGs are permitted. This grants a read path only; ChurchPro jobs do not yet upload QA screenshots. Path traversal, arbitrary URLs and cross-project jobs are denied. Downloads are capped at **900,000 bytes** and checked for PNG signature and MIME. CircleCI credentials and signed download URLs are never returned by the preview operation. Only allowed HTTPS origins/redirects are followed; S3 receives no CircleCI token.
 
-Success includes `outcome:{path,jobNumber,mediaType:"image/png",bytes,dataBase64}`. Decode the base64 into a local PNG and inspect it with the image viewer. Keep private image bytes out of logs/Notion/PR descriptions. The current preview supports PNG screenshots; `inspect` lists other report artifacts but does not return their contents. CI cannot retrieve artifacts that failed jobs never uploaded.
+Success includes `outcome:{path,jobNumber,mediaType:"image/png",bytes,dataBase64}`. Decode the base64 into a local PNG and inspect it with the image viewer. Keep private image bytes out of logs/Notion/PR descriptions. The current preview supports PNG screenshots; `inspect` lists other report artifact paths without returning signed URLs. CI cannot retrieve artifacts that failed jobs never uploaded.
+
+## Agent-to-agent QA report retrieval
+
+After an opt-in ChurchPro `qa_intel` pipeline finishes, find the `qa_intel_phase0` job and its `qa-intel/churchpro/agent-handoff.json` artifact path using `inspect`. Submit one `artifact_report` command with `project:"churchpro"`, exact pipeline/job UUIDs, job number and `artifactPath:"qa-intel/churchpro/agent-handoff.json"`. The command enforces project, pipeline, job and artifact ownership; it follows only safe CircleCI artifact redirects and never returns the signed download URL or raw JSON keys. Maximum response download is 65,536 bytes. The returned normalized fields include `evidenceStatus`, `productAcceptance:"pending_independent_qa_review"`, SHA and contract statuses. A failed CI job may still upload the handoff; inspect it instead of declaring acceptance.
+
+This report is evidence for an **independent QA agent** to review approved requirements, diagnose failures, report findings, request corrections and rerun the exact source revision. It is not an automated acceptance decision. QA-Intel also captures screenshots, browser console and API signals, but this bridge intentionally exposes only a narrowly vetted report and approved guest-page PNGs. Detailed diagnostics must be retrieved through vetted job-step metadata or appropriately authorized private QA execution. No secret or church-member data should be included.
 
 ## Jayson release
 
