@@ -235,6 +235,18 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (command.mode !== undefined || command.pipelineId !== undefined) throw new Error('Recent command has unexpected fields');
     return { command, project };
   }
+  if (command.action === 'artifact_report') {
+    if (command.project !== 'churchpro' || !Number.isSafeInteger(command.jobNumber) ||
+        command.jobNumber<1 || command.jobNumber>999999 ||
+        typeof command.jobId!=='string' || !UUID.test(command.jobId) ||
+        typeof command.pipelineId!=='string' || !UUID.test(command.pipelineId) ||
+        command.artifactPath!==CHURCHPRO_QA_REPORT ||
+        command.branch!==undefined || command.mode!==undefined ||
+        command.commitSha!==undefined || command.startNumber!==undefined) {
+      throw new Error('Artifact report not permitted');
+    }
+    return {command,project};
+  }
   if (command.action === 'artifact_preview') {
     if (!QA_IMAGE_PATHS[command.project] || !Number.isSafeInteger(command.jobNumber) ||
         command.jobNumber < 1 || command.jobNumber > 999999 ||
@@ -419,7 +431,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         .map(p => ({ id: p.id, number: p.number, state: p.state, createdAt: p.created_at, revision: p.vcs?.revision, errors: (p.errors || []).slice(0,3).map(e=>({type:e.type})) })),
     };
   }
-  if (command.action === 'artifact_preview') {
+  if (command.action === 'artifact_preview' || command.action === 'artifact_report') {
     const pipeline = await circleRequest(env,'/pipeline/'+command.pipelineId,undefined,requestFn);
     if (pipeline.project_slug !== project.slug) throw new Error('Pipeline project mismatch');
     const workflows = await circleRequest(env,'/pipeline/'+command.pipelineId+'/workflow',undefined,requestFn);
@@ -445,6 +457,10 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
       if (!token) break;
     }
     if (!found || typeof found.url!=='string') throw new Error('Artifact not found');
+    if (command.action === 'artifact_report') {
+      const report=await downloadChurchproReport(env,found.url,requestFn);
+      return {path:command.artifactPath,jobNumber:command.jobNumber,...report};
+    }
     const preview=await downloadQaImage(env,found.url,requestFn);
     // The URL (which can be short-lived or signed) must never be returned.
     return {path:command.artifactPath,jobNumber:command.jobNumber,...preview};
