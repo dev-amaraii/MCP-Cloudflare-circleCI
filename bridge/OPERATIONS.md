@@ -69,11 +69,18 @@ AmaraiiOS/Jayson definition IDs and all project slugs are pinned in source. Chur
 | `probe` | none | Unauthenticated network probes; no CircleCI token |
 | `release` | `branch`, `commitSha` (40 hex) | **Jayson only**, separately approved and QA-gated. Never use for AmaraiiOS |
 
-| `artifact_preview` | `pipelineId`, `jobId`, `jobNumber`, `artifactPath` | Owned AmaraiiOS QA PNG bytes; see below |
+| `artifact_preview` | `pipelineId`, `jobId`, `jobNumber`, `artifactPath` | Owned AmaraiiOS or ChurchPro QA PNG bytes, each under its project-specific prefix; see below |
 
 A ChurchPro `validation` request sends no pipeline parameters because its existing CircleCI `verify` workflow runs unconditionally. Keep the ChurchPro branch allowlist to `circleci-project-setup` until another branch includes the validated config; do not implicitly enable `main`.
 
 A validation request creates a pipeline, not a passing test. Follow with `inspect`, verify final workflow/job outcomes and the exact revision. For failed steps use `job_steps` with the owned pipeline/job identities. Validation and screenshots do not prove hosted UAT, payment, database migration or deployment acceptance.
+
+
+### ChurchPro on-demand validation
+
+The existing ChurchPro CircleCI project slug is `circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu`, pipeline name `build-and-test`. The project is already configured in CircleCI and its first ten-job `verify` workflow succeeded on commit `2c0c96e97a662cfe658fa700e3260c2ac839a44a`. The bridge discovers its pipeline definition by exact name, GitHub repository, and config path using CircleCI's read-only API; do not hardcode or guess a definition ID. A standard `trigger` command requires `project:"churchpro"`, `mode:"validation"`, and `branch:"circleci-project-setup"`. Then use `inspect` with the returned pipeline UUID and, if needed, `job_steps` with owned job identifiers. A green historical workflow is not evidence of a new bridge-triggered run.
+
+No automatic release, `main` branch trigger, QA-Intel execution, browser screenshot capture, or cross-project artifact access is enabled. ChurchPro screenshots become previewable only after its CI configuration uploads owned PNG artifacts under `qa-intel/churchpro/`.
 
 ## Screenshot preview
 
