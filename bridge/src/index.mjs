@@ -17,6 +17,8 @@ const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
 
 const IMAGE_ARTIFACT_MAX_BYTES = 900000;
+const REPORT_ARTIFACT_MAX_BYTES = 65536;
+const CHURCHPRO_QA_REPORT = 'qa-intel/churchpro/agent-handoff.json';
 // Only disposable NEN QA screenshots, never an arbitrary CircleCI artifact or URL.
 // A screenshot is readable only within its explicitly registered project's QA prefix.
 const QA_IMAGE_PATHS = Object.freeze({
@@ -82,6 +84,70 @@ async function downloadQaImage(env, urlValue, requestFn = fetch) {
   throw new Error('Artifact download failed');
 }
 
+
+// Fetch one strictly scoped QA handoff without forwarding arbitrary CI content.
+// Do not return signed links, raw logs, member records or unreviewed JSON keys.
+async function downloadChurchproReport(env, urlValue, requestFn = fetch) {
+  let url;
+  try { url = new URL(urlValue); } catch { throw new Error('Unsafe artifact URL'); }
+  for (let redirects=0; redirects<3; redirects++) {
+    if (!artifactHostAllowed(url)) throw new Error('Unsafe artifact URL');
+    const trusted = url.hostname === 'circleci.com' ||
+      url.hostname === 'circle-artifacts.com' || url.hostname.endsWith('.circle-artifacts.com');
+    const response = await requestFn(url.toString(), {method:'GET',redirect:'manual',
+      headers: trusted ? {'Circle-Token':env.CIRCLE_TOKEN,Accept:'application/json'} : {Accept:'application/json'}});
+    if ([301,302,303,307,308].includes(response.status)) {
+      const location=response.headers.get('location');
+      if (!location) throw new Error('Artifact download failed');
+      url=new URL(location,url);
+      continue;
+    }
+    if (!response.ok || !response.body) throw new Error('Artifact download failed');
+    const type=response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+    if (type && !['application/json','application/octet-stream','text/plain'].includes(type))
+      throw new Error('Artifact format not supported');
+    const length=Number(response.headers.get('content-length') || 0);
+    if (!Number.isFinite(length) || length>REPORT_ARTIFACT_MAX_BYTES)
+      throw new Error('Artifact too large');
+    const reader=response.body.getReader(), chunks=[];
+    let count=0;
+    for (;;) {
+      const {value,done}=await reader.read();
+      if (done) break;
+      count+=value.byteLength;
+      if (count>REPORT_ARTIFACT_MAX_BYTES) {
+        await reader.cancel(); throw new Error('Artifact too large');
+      }
+      chunks.push(value);
+    }
+    if (!count) throw new Error('Artifact download failed');
+    const bytes=new Uint8Array(count);let offset=0;
+    for (const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    let report;
+    try { report=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes)); }
+    catch { throw new Error('Invalid QA handoff JSON'); }
+    if (!isPlainObject(report) || report.schemaVersion!==1 || report.product!=='ChurchPro' ||
+        !['passed','failed'].includes(report.evidenceStatus) ||
+        report.productAcceptance!=='pending_independent_qa_review' ||
+        !Array.isArray(report.checks) || report.checks.length===0 || report.checks.length>32)
+      throw new Error('Invalid QA handoff schema');
+    const checks=report.checks.map(item=>{
+      if (!isPlainObject(item) || typeof item.intent!=='string' ||
+          !/^[a-z0-9_]{1,100}$/.test(item.intent) ||
+          !['passed','failed','not_executed'].includes(item.status))
+        throw new Error('Invalid QA handoff contract');
+      return {intent:item.intent,status:item.status,
+        failureLayer:['ui','api','business','test'].includes(item.failureLayer)
+          ? item.failureLayer:null};
+    });
+    const revision=typeof report.revision==='string' && COMMIT_SHA.test(report.revision)
+      ? report.revision : null;
+    return {schemaVersion:1,project:'churchpro',revision,
+      evidenceStatus:report.evidenceStatus,
+      productAcceptance:'pending_independent_qa_review',checks};
+  }
+  throw new Error('Artifact download failed');
+}
 
 export const PROJECTS = Object.freeze({
   churchpro: Object.freeze({
