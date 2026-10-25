@@ -92,7 +92,7 @@ export const PROJECTS = Object.freeze({
     repository: 'dev-amaraii/ChurchPro',
     branches: ['circleci-project-setup'],
     // ChurchPro's current CircleCI config has no pipeline parameters.
-    modes: Object.freeze({validation: null}),
+    modes: Object.freeze({validation: null, qa_intel: 'run_qa_intel'}),
   }),
   'amaraii-os': Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw',
