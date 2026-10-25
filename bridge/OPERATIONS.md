@@ -53,8 +53,9 @@ If delivery/result is uncertain, never automatically retry a trigger/release or 
 | --- | --- | --- | --- |
 | `amaraii-os` | `development`, `staging`, `codex/p2-live-billing-pilot` | `validation` | Denied |
 | `jayson-storefront` | `feat/storefront-demo` | `validation`, `preview_qa` | Separately approved full-SHA preview only |
+| `churchpro` | `circleci-project-setup` | `validation` | Denied |
 
-Definition IDs and project slugs are pinned in source. No caller-supplied API URL, shell command or arbitrary pipeline parameter is accepted. Native GitHub `run-ci` label-added validation remains an option for AmaraiiOS feature PRs outside the bridge's branch allowlist; verify the exact current PR SHA.
+AmaraiiOS/Jayson definition IDs and all project slugs are pinned in source. ChurchPro discovers its existing `build-and-test` definition using the authenticated CircleCI read-only project/definitions API, requiring an exact `dev-amaraii/ChurchPro` repository and `.circleci/config.yml` path match before a trigger. No caller-supplied API URL, shell command or arbitrary pipeline parameter is accepted. Native GitHub `run-ci` label-added validation remains an option for AmaraiiOS feature PRs outside the bridge's branch allowlist; verify the exact current PR SHA.
 
 | Action | Additional fields | Result / notes |
 | --- | --- | --- |
@@ -70,11 +71,13 @@ Definition IDs and project slugs are pinned in source. No caller-supplied API UR
 
 | `artifact_preview` | `pipelineId`, `jobId`, `jobNumber`, `artifactPath` | Owned AmaraiiOS QA PNG bytes; see below |
 
+A ChurchPro `validation` request sends no pipeline parameters because its existing CircleCI `verify` workflow runs unconditionally. Keep the ChurchPro branch allowlist to `circleci-project-setup` until another branch includes the validated config; do not implicitly enable `main`.
+
 A validation request creates a pipeline, not a passing test. Follow with `inspect`, verify final workflow/job outcomes and the exact revision. For failed steps use `job_steps` with the owned pipeline/job identities. Validation and screenshots do not prove hosted UAT, payment, database migration or deployment acceptance.
 
 ## Screenshot preview
 
-Send an `artifact_preview` command with the standard identity/time/approval fields, `project:"amaraii-os"`, exact pipeline UUID, job UUID, job number, and exact artifact path listed by `inspect`. Permitted paths end in `.png` under `nen-customer-operations-qa/`, `bank-transfer-qa/`, or `qa-intel/transactions/`. Path traversal, arbitrary URLs and cross-project jobs are denied. Downloads are capped at **900,000 bytes** and checked for PNG signature and MIME. CircleCI credentials and signed download URLs are never returned by the preview operation. Only allowed HTTPS origins/redirects are followed; S3 receives no CircleCI token.
+Send an `artifact_preview` command with the standard identity/time/approval fields, exact project, pipeline UUID, job UUID, job number, and exact artifact path listed by `inspect`. For `amaraii-os`, approved `.png` prefixes are `nen-customer-operations-qa/`, `bank-transfer-qa/`, and `qa-intel/transactions/`. For `churchpro`, only `qa-intel/churchpro/` PNGs are permitted. This grants a read path only; ChurchPro jobs do not yet upload QA screenshots. Path traversal, arbitrary URLs and cross-project jobs are denied. Downloads are capped at **900,000 bytes** and checked for PNG signature and MIME. CircleCI credentials and signed download URLs are never returned by the preview operation. Only allowed HTTPS origins/redirects are followed; S3 receives no CircleCI token.
 
 Success includes `outcome:{path,jobNumber,mediaType:"image/png",bytes,dataBase64}`. Decode the base64 into a local PNG and inspect it with the image viewer. Keep private image bytes out of logs/Notion/PR descriptions. The current preview supports PNG screenshots; `inspect` lists other report artifacts but does not return their contents. CI cannot retrieve artifacts that failed jobs never uploaded.
 
