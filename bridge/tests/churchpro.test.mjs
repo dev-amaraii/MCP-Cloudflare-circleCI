@@ -83,6 +83,21 @@ test('ChurchPro resolves only its exact CircleCI definition and sends no pipelin
   assert.equal(JSON.stringify(outcome).includes('synthetic-token'), false);
 });
 
+test('ChurchPro QA-Intel runs only with its explicit pipeline parameter', async () => {
+  const cmd = command('trigger', { branch: 'circleci-project-setup', mode: 'qa_intel' });
+  const valid = validateCommand(cmd, requestId, Date.parse(now));
+  const network = mockCircleCI();
+  const result = await executeCommand({ CIRCLE_TOKEN: 'synthetic-token' },
+    valid.command, valid.project, network.send);
+  assert.equal(result.mode, 'qa_intel');
+  assert.deepEqual(JSON.parse(network.requests.at(-1).init.body), {
+    definition_id: definitionId,
+    config: { branch: 'circleci-project-setup' },
+    checkout: { branch: 'circleci-project-setup' },
+    parameters: { run_qa_intel: true },
+  });
+});
+
 test('wrong or ambiguous definitions fail closed before any paid trigger', async () => {
   const cmd = command('trigger', { branch: 'circleci-project-setup', mode: 'validation' });
   const wrong = [
