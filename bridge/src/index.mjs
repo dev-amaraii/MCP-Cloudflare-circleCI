@@ -83,7 +83,7 @@ export const PROJECTS = Object.freeze({
   'amaraii-os': Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/LGszExeHMrkJtuxPVvDpjw',
     definitionId: 'c4c6aad9-03c1-4e9e-99ca-cd650deda730',
-    branches: ['codex/p2-live-billing-pilot', 'development', 'staging'],
+    branches: ['codex/p2-live-billing-pilot', 'development', 'staging', 'design/amaraii-learn-v1-spec-20261028'],
     modes: Object.freeze({validation: 'run_validation'}),
   }),
   'jayson-storefront': Object.freeze({
