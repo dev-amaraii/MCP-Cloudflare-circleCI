@@ -1,0 +1,39 @@
+name: NEN CI bridge — isolated allowlist test
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "bridge/src/index.mjs"
+      - "bridge/tests/**"
+      - ".github/workflows/test-learn-allowlist.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nen-ci-bridge-allowlist-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test-bridge:
+    if: >-
+      github.event.pull_request.number == 8 &&
+      github.event.pull_request.head.repo.full_name == 'dev-amaraii/MCP-Cloudflare-circleCI' &&
+      github.event.pull_request.head.ref == 'ci/amaraii-learn-validation-allowlist-20261028'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Run all private bridge unit tests
+        run: node --test bridge/tests/*.test.mjs
+      - name: Confirm bridge source stays validation-only for Amaraii
+        run: |
+          node --input-type=module -e "import { PROJECTS } from './bridge/src/index.mjs'; const p=PROJECTS['amaraii-os']; if (p.releaseParameter || Object.keys(p.modes).join(',') !== 'validation') process.exit(1); console.log('Amaraii release disabled; modes:', JSON.stringify(p.modes));"

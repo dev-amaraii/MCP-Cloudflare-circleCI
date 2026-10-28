@@ -51,8 +51,10 @@ If delivery/result is uncertain, never automatically retry a trigger/release or 
 
 | Project | Branches | QA modes | Release |
 | --- | --- | --- | --- |
-| `amaraii-os` | `development`, `staging`, `codex/p2-live-billing-pilot` | `validation` | Denied |
+| `amaraii-os` | `development`, `staging`, `codex/p2-live-billing-pilot`, `design/amaraii-learn-v1-spec-20261028` | `validation` | Denied |
 | `jayson-storefront` | `feat/storefront-demo` | `validation`, `preview_qa` | Separately approved full-SHA preview only |
+
+**Pending-review note (28 October 2026):** The Learn branch entry in this source tree is a *proposed* validation-only expansion; it is not present in the deployed Worker unless this change passes testing and is separately approved and activated. Its sole purpose is to unblock exact-head CI of Amaraii Learn draft PR #37. There is no new release mode, deployment action, credential, scheduled polling, or public endpoint. Do not treat the row above as live proof until the active Worker version and its allowed-branches health result are verified.
 
 Definition IDs and project slugs are pinned in source. No caller-supplied API URL, shell command or arbitrary pipeline parameter is accepted. Native GitHub `run-ci` label-added validation remains an option for AmaraiiOS feature PRs outside the bridge's branch allowlist; verify the exact current PR SHA.
 
