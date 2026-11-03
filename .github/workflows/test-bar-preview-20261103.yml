@@ -1,0 +1,25 @@
+name: NEN bridge - scoped Bar QA preview regression
+on:
+  push:
+    branches:
+      - feat/bar-qa-scoped-preview-20261103
+permissions:
+  contents: read
+jobs:
+  bridge-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Execute complete isolated bridge test suite
+        run: node --test bridge/tests/*.test.mjs
+      - name: Assert Amaraii bridge stays validation-only
+        run: |
+          node --input-type=module -e "import {PROJECTS} from './bridge/src/index.mjs'; const p=PROJECTS['amaraii-os']; if(p.releaseParameter || Object.keys(p.modes).join(',')!=='validation') process.exit(1); console.log('Amaraii validation-only registry intact');"
+      - name: Check patch hygiene
+        run: git diff --check HEAD~1 HEAD
