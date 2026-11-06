@@ -13,7 +13,7 @@ const command={v:1,id,action:'artifact_preview',project:'amaraii-os',
   requestedAt:'2026-10-24T08:00:00.000Z'};
 const bytes=Uint8Array.from([137,80,78,71,13,10,26,10,0,0,0,0]);
 function reply(value){return Response.json(value);}
-function transport({foreign=false,location=artifactUrl,payload=bytes,mime='image/png',length}={}){
+function transport({foreign=false,location=artifactUrl,payload=bytes,mime='image/png',length,artifactPath=pngPath}={}){
   const requests=[];
   const send=async (url,options)=>{
     requests.push({url,headers:options?.headers});
@@ -24,7 +24,7 @@ function transport({foreign=false,location=artifactUrl,payload=bytes,mime='image
     if(url.endsWith('/workflow/workflow-test/job'))
       return reply({items:[{id:jobId,job_number:49,project_slug:project.slug}]});
     if(url.includes('/49/artifacts'))
-      return reply({items:[{path:pngPath,url:location}],next_page_token:null});
+      return reply({items:[{path:artifactPath,url:location}],next_page_token:null});
     if(url===location) return new Response(payload,{headers:{
       'Content-Type':mime,...(length?{'Content-Length':String(length)}:{})
     }});
@@ -45,6 +45,52 @@ test('artifact preview validates the request and rejects arbitrary paths and pro
     {jobNumber:0},
   ]) assert.throws(()=>validateCommand({...command,...patch},id,Date.parse(command.requestedAt)),/Artifact preview not permitted/);
 });
+test('Bar/POS screenshots are restricted to named synthetic cashier and table-bill PNGs',()=>{
+  const permitted=[
+    ...[320,390,1440].map(width=>'qa-intel/bar-cashier/bar-sell-'+width+'.png'),
+    'qa-intel/bar-cashier/bar-receipt-mobile.png',
+    'qa-intel/bar-cashier/bar-stock-mobile.png',
+    'qa-intel/bar-cashier/bar-cash-up.png',
+    'qa-intel/bar-cashier/bar-manager-products.png',
+    ...[320,390,1440].map(width=>'qa-intel/bar-table-bills/table-bills-'+width+'.png'),
+    'qa-intel/bar-table-bills/tab-open-uncertain-mobile.png',
+    ...[320,390,1440].map(width=>'qa-intel/bar-table-bills/tab-cash-settled-'+width+'.png'),
+  ];
+  for(const artifactPath of permitted){
+    const safe={...command,artifactPath};
+    assert.equal(validateCommand(safe,id,Date.parse(command.requestedAt)).command,safe,artifactPath);
+  }
+  for(const artifactPath of [
+    'qa-intel/bar-cashier/private-customer.png',
+    'qa-intel/bar-cashier/bar-sell-768.png',
+    'qa-intel/bar-cashier/bar-sell-320.json',
+    'qa-intel/bar-cashier/secret/bar-cash-up.png',
+    'qa-intel/bar-table-bills/tab-cash-settled-768.png',
+    'qa-intel/bar-table-bills/table-bills-999.png',
+    'qa-intel/bar-table-bills/table-bills-390.json',
+    'qa-intel/bar-table-bills/../transactions/overview.png',
+    'qa-intel/bar-cashier/bar-sell-390.png/child.png',
+    'qa-intel/bar-other/bar-sell-390.png',
+  ]){
+    assert.throws(()=>validateCommand({...command,artifactPath},id,Date.parse(command.requestedAt)),
+      /Artifact preview not permitted/,artifactPath);
+  }
+  assert.throws(()=>validateCommand({...command,project:'churchpro',artifactPath:permitted[0]},id,
+    Date.parse(command.requestedAt)),/Artifact preview not permitted/);
+});
+
+test('retrieves an owned Bar cashier screenshot without exposing token or artifact URL',async()=>{
+  const artifactPath='qa-intel/bar-cashier/bar-cash-up.png';
+  const signedUrl='https://output.circle-artifacts.com/output/job/'+jobId+'/artifacts/0/'+artifactPath;
+  const t=transport({artifactPath,location:signedUrl});
+  const result=await executeCommand({CIRCLE_TOKEN:'synthetic-only'},{...command,artifactPath},project,t.send);
+  assert.equal(result.path,artifactPath);
+  assert.equal(result.bytes,bytes.length);
+  assert.deepEqual(Buffer.from(result.dataBase64,'base64'),Buffer.from(bytes));
+  assert.equal(JSON.stringify(result).includes('circle-artifacts.com'),false);
+  assert.equal(JSON.stringify(result).includes('synthetic-only'),false);
+});
+
 test('reads one owned QA screenshot, returns PNG bytes but never the signed URL',async()=>{
   const t=transport();
   const result=await executeCommand({CIRCLE_TOKEN:'synthetic-only'},command,project,t.send);

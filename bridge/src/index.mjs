@@ -7,6 +7,8 @@
  * Approved release requests only trigger a separate SHA-pinned CircleCI
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
+import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+
 const API = 'https://circleci.com/api/v2';
 const PREFIX = 'requests/';
 const RESULT_PREFIX = 'results/';
@@ -25,6 +27,11 @@ const QA_IMAGE_PATHS = Object.freeze({
   'amaraii-os': /^(?:nen-customer-operations-qa|bank-transfer-qa|qa-intel\/transactions)\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
   churchpro: /^qa-intel\/churchpro\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
 });
+
+// Bar/POS screenshots use disposable CircleCI fixtures. Only the exact,
+// already-produced cashier and table-bill captures are readable; no JSON,
+// arbitrary Bar directory traversal, payment documents, or signed URLs.
+const AMARAII_BAR_QA_SCREENSHOTS = /^(?:qa-intel\/bar-cashier\/(?:bar-sell-(?:320|390|1440)|bar-receipt-mobile|bar-stock-mobile|bar-cash-up|bar-manager-products)|qa-intel\/bar-table-bills\/(?:table-bills-(?:320|390|1440)|tab-open-uncertain-mobile|tab-cash-settled-(?:320|390|1440)))\.png$/;
 
 function artifactHostAllowed(url) {
   const h = url.hostname.toLowerCase();
@@ -187,7 +194,7 @@ function hasOnlyKeys(value, keys) {
 
 export function validateCommand(command, keyId, now = Date.now()) {
   if (!isPlainObject(command) ||
-      !hasOnlyKeys(command, ['v','id','action','project','branch','mode','commitSha','pipelineId','startNumber','jobNumber','jobId','artifactPath','requestedAt','approved'])) {
+      !hasOnlyKeys(command, ['v','id','action','project','provider','branch','mode','commitSha','pipelineId','startNumber','jobNumber','jobId','artifactPath','requestedAt','approved'])) {
     throw new Error('Invalid command shape');
   }
   if (command.v !== 1 || command.id !== keyId || !UUID.test(command.id)) {
@@ -200,15 +207,30 @@ export function validateCommand(command, keyId, now = Date.now()) {
   }
   const project = PROJECTS[command.project];
   if (!project || !Object.hasOwn(PROJECTS, command.project)) throw new Error('Project not permitted');
+  const provider = command.provider ?? 'circleci';
+  if (provider !== 'circleci' && provider !== 'semaphore') throw new Error('CI provider not permitted');
+  if (provider === 'semaphore' &&
+      (command.project !== 'amaraii-os' || !['health','trigger','inspect'].includes(command.action))) {
+    throw new Error('Semaphore action not permitted');
+  }
   if (command.action === 'health') {
-    if (command.branch !== undefined || command.mode !== undefined || command.pipelineId !== undefined) {
+    if (command.branch !== undefined || command.mode !== undefined ||
+        command.pipelineId !== undefined || (provider === 'semaphore' && command.commitSha !== undefined)) {
       throw new Error('Health command has unexpected fields');
     }
     return { command, project };
   }
   if (command.action === 'trigger') {
-    if (typeof command.branch !== 'string' || !project.branches.includes(command.branch)) throw new Error('Branch not permitted');
-    if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) throw new Error('Pipeline mode not permitted');
+    const branches = provider === 'semaphore' ? SEMAPHORE_BRANCHES : project.branches;
+    if (typeof command.branch !== 'string' || !branches.includes(command.branch)) throw new Error('Branch not permitted');
+    if (provider === 'semaphore') {
+      if (command.mode !== 'validation') throw new Error('Pipeline mode not permitted');
+      if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha)) {
+        throw new Error('Invalid Semaphore revision');
+      }
+    } else if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) {
+      throw new Error('Pipeline mode not permitted');
+    }
     if (command.pipelineId !== undefined) throw new Error('Trigger does not accept pipelineId');
     return { command, project };
   }
@@ -253,7 +275,9 @@ export function validateCommand(command, keyId, now = Date.now()) {
         typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
         typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
         typeof command.artifactPath !== 'string' || command.artifactPath.length > 240 ||
-        !QA_IMAGE_PATHS[command.project].test(command.artifactPath) || command.artifactPath.includes('..') ||
+        !(QA_IMAGE_PATHS[command.project].test(command.artifactPath) ||
+          (command.project === 'amaraii-os' && AMARAII_BAR_QA_SCREENSHOTS.test(command.artifactPath))) ||
+        command.artifactPath.includes('..') ||
         command.branch !== undefined || command.mode !== undefined || command.commitSha !== undefined ||
         command.startNumber !== undefined) {
       throw new Error('Artifact preview not permitted');
@@ -277,7 +301,8 @@ export function validateCommand(command, keyId, now = Date.now()) {
   }
   if (command.action === 'inspect') {
     if (typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) throw new Error('Invalid pipelineId');
-    if (command.branch !== undefined || command.mode !== undefined) throw new Error('Inspect has unexpected fields');
+    if (command.branch !== undefined || command.mode !== undefined ||
+        (provider === 'semaphore' && command.commitSha !== undefined)) throw new Error('Inspect has unexpected fields');
     return { command, project };
   }
   throw new Error('Action not permitted');
@@ -333,6 +358,7 @@ async function resolveDefinitionId(env, project, requestFn) {
 }
 
 export async function executeCommand(env, command, project, requestFn = fetch) {
+  if (command.provider === 'semaphore') return executeSemaphore(env, command, requestFn);
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',
@@ -676,6 +702,9 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
     const safe = [
       'Invalid command shape', 'Invalid request identity', 'Explicit approval required',
       'Command is expired or clock is invalid', 'Project not permitted',
+       'CI provider not permitted', 'Semaphore action not permitted', 'Invalid Semaphore revision',
+       'Semaphore project not configured', 'Semaphore token not configured',
+       'Semaphore project mismatch', 'Invalid Semaphore response',
       'Branch not permitted', 'Pipeline mode not permitted', 'Invalid pipelineId',
       'Action not permitted', 'Health command has unexpected fields',
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
@@ -689,7 +718,8 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
     const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ||
-      /^Unsafe artifact URL: [a-z0-9.-]{1,253}$/.test(message) ? message
+      /^Unsafe artifact URL: [a-z0-9.-]{1,253}$/.test(message) ||
+      /^Semaphore API HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof SyntaxError ? 'Invalid JSON response or command'
       : /^CircleCI v3 HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof TypeError ? 'Network or API transport failure'

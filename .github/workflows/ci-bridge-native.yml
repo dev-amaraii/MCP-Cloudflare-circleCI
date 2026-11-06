@@ -1,0 +1,36 @@
+name: CI Bridge Native Node Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bridge/src/**'
+      - 'bridge/tests/**'
+      - 'bridge/package.json'
+      - '.github/workflows/ci-bridge-native.yml'
+  push:
+    branches:
+      - feat/semaphore-private-ci-adapter-20261106
+    paths:
+      - 'bridge/src/**'
+      - 'bridge/tests/**'
+      - 'bridge/package.json'
+      - '.github/workflows/ci-bridge-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node24:
+    name: Bridge regression suite (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify native Node tests
+        working-directory: bridge
+        run: node --test tests/*.test.mjs
