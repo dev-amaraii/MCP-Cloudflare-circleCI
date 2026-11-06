@@ -1,6 +1,13 @@
 name: CI Bridge Native Node Tests
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'bridge/src/**'
+      - 'bridge/tests/**'
+      - 'bridge/package.json'
+      - '.github/workflows/ci-bridge-native.yml'
   push:
     branches:
       - feat/semaphore-private-ci-adapter-20261106
