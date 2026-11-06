@@ -28,6 +28,11 @@ const QA_IMAGE_PATHS = Object.freeze({
   churchpro: /^qa-intel\/churchpro\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
 });
 
+// Bar/POS screenshots use disposable CircleCI fixtures. Only the exact,
+// already-produced cashier and table-bill captures are readable; no JSON,
+// arbitrary Bar directory traversal, payment documents, or signed URLs.
+const AMARAII_BAR_QA_SCREENSHOTS = /^(?:qa-intel\/bar-cashier\/(?:bar-sell-(?:320|390|1440)|bar-receipt-mobile|bar-stock-mobile|bar-cash-up|bar-manager-products)|qa-intel\/bar-table-bills\/(?:table-bills-(?:320|390|1440)|tab-open-uncertain-mobile|tab-cash-settled-(?:320|390|1440)))\.png$/;
+
 function artifactHostAllowed(url) {
   const h = url.hostname.toLowerCase();
   return url.protocol === 'https:' && !url.username && !url.password && !url.port &&
@@ -270,7 +275,9 @@ export function validateCommand(command, keyId, now = Date.now()) {
         typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
         typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
         typeof command.artifactPath !== 'string' || command.artifactPath.length > 240 ||
-        !QA_IMAGE_PATHS[command.project].test(command.artifactPath) || command.artifactPath.includes('..') ||
+        !(QA_IMAGE_PATHS[command.project].test(command.artifactPath) ||
+          (command.project === 'amaraii-os' && AMARAII_BAR_QA_SCREENSHOTS.test(command.artifactPath))) ||
+        command.artifactPath.includes('..') ||
         command.branch !== undefined || command.mode !== undefined || command.commitSha !== undefined ||
         command.startNumber !== undefined) {
       throw new Error('Artifact preview not permitted');
