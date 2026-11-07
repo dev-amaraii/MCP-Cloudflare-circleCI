@@ -8,6 +8,7 @@
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
 const PREFIX = 'requests/';
@@ -208,7 +209,9 @@ export function validateCommand(command, keyId, now = Date.now()) {
   const project = PROJECTS[command.project];
   if (!project || !Object.hasOwn(PROJECTS, command.project)) throw new Error('Project not permitted');
   const provider = command.provider ?? 'circleci';
-  if (provider !== 'circleci' && provider !== 'semaphore') throw new Error('CI provider not permitted');
+  if (!['circleci','semaphore','auto'].includes(provider)) throw new Error('CI provider not permitted');
+  if (provider === 'auto' && (command.project !== 'amaraii-os' ||
+      !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
   if (provider === 'semaphore' &&
       (command.project !== 'amaraii-os' || !['health','trigger','inspect'].includes(command.action))) {
     throw new Error('Semaphore action not permitted');
@@ -220,7 +223,14 @@ export function validateCommand(command, keyId, now = Date.now()) {
     }
     return { command, project };
   }
-  if (command.action === 'trigger') {
+  if (command.action === 'route' || command.action === 'trigger') {
+    if (command.action === 'route' && provider !== 'auto') throw new Error('Automatic CI route not permitted');
+    if (provider === 'auto') {
+      if (command.branch !== 'development' || command.project !== 'amaraii-os' ||
+          command.mode !== 'validation') throw new Error('Automatic CI route not permitted');
+      if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha))
+        throw new Error('Invalid automatic CI revision');
+    }
     const branches = provider === 'semaphore' ? SEMAPHORE_BRANCHES : project.branches;
     if (typeof command.branch !== 'string' || !branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (provider === 'semaphore') {
@@ -231,7 +241,9 @@ export function validateCommand(command, keyId, now = Date.now()) {
     } else if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) {
       throw new Error('Pipeline mode not permitted');
     }
-    if (command.pipelineId !== undefined) throw new Error('Trigger does not accept pipelineId');
+    if (command.pipelineId !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined || command.jobId !== undefined ||
+        command.artifactPath !== undefined) throw new Error('Trigger has unexpected fields');
     return { command, project };
   }
   if (command.action === 'release') {
@@ -358,6 +370,24 @@ async function resolveDefinitionId(env, project, requestFn) {
 }
 
 export async function executeCommand(env, command, project, requestFn = fetch) {
+  if (command.provider === 'auto') {
+    const selection=selectProvider(env,command);
+    if (command.action === 'route') return {
+      provider:selection.provider,reason:selection.reason,automaticFallback:selection.automaticFallback,
+      validationScope:'core_and_learn_only',
+      revisionVerificationRequired:selection.provider==='circleci',
+      ...(selection.exhaustionExpiresAt ? {exhaustionExpiresAt:selection.exhaustionExpiresAt} : {}),
+    };
+    // Only one external trigger is ever attempted. A rejected, timed-out or
+    // ambiguous CircleCI POST must NOT result in a second provider trigger.
+    if (selection.provider === 'semaphore') {
+      return { ...await executeSemaphore(env,{...command,provider:'semaphore'},requestFn),
+        selectionReason:selection.reason };
+    }
+    const result=await executeCommand(env,{...command,provider:'circleci'},project,requestFn);
+    return {...result,provider:'circleci',requestedRevision:command.commitSha,
+      revisionVerificationRequired:true,selectionReason:selection.reason};
+  }
   if (command.provider === 'semaphore') return executeSemaphore(env, command, requestFn);
   if (command.action === 'health') {
     return {
@@ -703,6 +733,9 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
       'Invalid command shape', 'Invalid request identity', 'Explicit approval required',
       'Command is expired or clock is invalid', 'Project not permitted',
        'CI provider not permitted', 'Semaphore action not permitted', 'Invalid Semaphore revision',
+       'Automatic CI route not permitted', 'Invalid automatic CI revision',
+       'Automatic CI routing disabled', 'Invalid CircleCI exhaustion marker',
+       'Semaphore fallback not enabled', 'Trigger has unexpected fields',
        'Semaphore project not configured', 'Semaphore token not configured',
        'Semaphore project mismatch', 'Invalid Semaphore response',
       'Branch not permitted', 'Pipeline mode not permitted', 'Invalid pipelineId',
