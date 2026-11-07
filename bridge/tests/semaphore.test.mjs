@@ -26,7 +26,7 @@ class KV {
 }
 
 test('Semaphore is opt-in, validation-only and pins the current pilot branch and exact revision',()=>{
- assert.deepEqual(SEMAPHORE_BRANCHES,[branch]);
+ assert.deepEqual(SEMAPHORE_BRANCHES,[branch,'development']);
  assert.equal(validate(command('trigger',{branch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  for(const patch of [
   {branch:'development',mode:'validation',commitSha:revision},
