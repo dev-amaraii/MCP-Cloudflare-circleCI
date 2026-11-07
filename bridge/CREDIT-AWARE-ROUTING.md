@@ -1,6 +1,6 @@
 # NEN CI Bridge — Credit-aware validation routing
 
-Owner: NEN International. Source-only until native CI and Semaphore development-branch acceptance pass.
+Owner: NEN International. Source-only for PR #11 until its native CI and staged/live acceptance pass. Amaraii QA parity PR #96 has merged; full browser/QA acceptance on the merged `development` SHA remains to be verified.
 
 ## Scope
 - `provider:"auto"` is an **opt-in**, explicitly approved command for `amaraii-os` on `development`, `mode:"validation"`, with required exact 40-character commit SHA.
@@ -36,8 +36,9 @@ After verifying the read-only result, a new UUID with `action:"trigger"` creates
 When auto chooses CircleCI, its current GitHub App branch trigger is **not SHA pinned**. The returned `requestedRevision` is an intent, not evidence: `revisionVerificationRequired:true` and the actual pipeline's inspected `vcs.revision` must match before any acceptance. When auto chooses Semaphore, its API call pins `commit_sha` in the request.
 
 ## Acceptance gates
-- [ ] PR #96 Semaphore Learn, Chromium, and ActionEngine validation passes.
-- [ ] Native Node 24 bridge regression suite passes with these changes.
+- [x] PR #96 Semaphore Learn, Chromium, and ActionEngine validation passed on pilot branch SHA `c8a2cf35` and merged at `b6eb1702`.
+- [ ] Equivalent Semaphore validation verified on current `development` SHA.
+- [x] Native Node 24 bridge regression suite passed 59/59 after the `development` allowlist update (run 42380958990, commit `ca4987e4`).
 - [ ] Code-review approved; no production application deployment or DB mutation.
 - [ ] Operator verifies exhaustion status and enables signals only when needed.
 - [ ] Stage Cloudflare Worker version with strict binding inheritance, reconcile live source, then approve activation.
