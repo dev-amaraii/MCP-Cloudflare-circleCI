@@ -7,7 +7,7 @@
 const API = 'https://amaraii.semaphoreci.com/api/v1alpha';
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const SHA = /^[a-f0-9]{40}$/;
-export const SEMAPHORE_BRANCHES = Object.freeze(['ci/semaphore-validation-20261106']);
+export const SEMAPHORE_BRANCHES = Object.freeze(['ci/semaphore-validation-20261106','development']);
 
 function projectId(env) {
   if (typeof env.SEMAPHORE_PROJECT_ID !== 'string' || !UUID.test(env.SEMAPHORE_PROJECT_ID)) {
