@@ -29,7 +29,7 @@ test('Semaphore is opt-in, validation-only and pins the current pilot branch and
  assert.deepEqual(SEMAPHORE_BRANCHES,[branch,'development']);
  assert.equal(validate(command('trigger',{branch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  for(const patch of [
-  {branch:'development',mode:'validation',commitSha:revision},
+  {branch:'staging',mode:'validation',commitSha:revision},
   {branch,mode:'validation'},
   {branch,mode:'qa_intel',commitSha:revision},
   {branch,mode:'validation',commitSha:'bad'},
