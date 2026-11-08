@@ -1,13 +1,18 @@
 /**
  * Explicit, validation-only Semaphore adapter for Amaraii.
  * This never receives caller-supplied URLs, project IDs or YAML paths.
- * The pilot is intentionally pinned to the CI feature branch until PR #95
- * is merged and verified; there is no automatic billable failover.
+ * A small, explicit branch-to-pipeline allowlist prevents arbitrary CI YAML
+ * execution. No automatic billable failover or deploy access is granted.
  */
 const API = 'https://amaraii.semaphoreci.com/api/v1alpha';
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const SHA = /^[a-f0-9]{40}$/;
-export const SEMAPHORE_BRANCHES = Object.freeze(['ci/semaphore-validation-20261106','development']);
+const SEMAPHORE_PIPELINES = Object.freeze({
+  'ci/semaphore-validation-20261106': '.semaphore/semaphore.yml',
+  development: '.semaphore/semaphore.yml',
+  'codex/bar-bill-summary-20261107': '.semaphore/bar-bill-review.yml',
+});
+export const SEMAPHORE_BRANCHES = Object.freeze(Object.keys(SEMAPHORE_PIPELINES));
 
 function projectId(env) {
   if (typeof env.SEMAPHORE_PROJECT_ID !== 'string' || !UUID.test(env.SEMAPHORE_PROJECT_ID)) {
@@ -60,7 +65,7 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
       project_id:id,
       reference:'refs/heads/' + command.branch,
       commit_sha:command.commitSha,
-      pipeline_file:'.semaphore/semaphore.yml',
+      pipeline_file:SEMAPHORE_PIPELINES[command.branch],
     }, requestFn);
     if (!UUID.test(response.workflow_id || '') || !UUID.test(response.pipeline_id || '')) {
       throw new Error('Invalid Semaphore response');
