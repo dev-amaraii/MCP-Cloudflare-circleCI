@@ -142,6 +142,37 @@ test('inspect returns bounded job metadata, verified revision, and no raw logs o
  assert.equal(JSON.stringify(result).includes('sensitive.example'),false);
 });
 
+test('failed owned Semaphore job yields bounded redacted command diagnostics',async()=>{
+ const jobId='55555555-6666-4777-8888-999999999999';
+ const calls=[];
+ const cmd=command('inspect',{pipelineId});
+ const result=await execute(cmd,async(url)=>{
+  calls.push(url);
+  if(url.endsWith('/logs/'+jobId))return response({events:[
+   {event:'cmd_started',directive:'pnpm typecheck'},
+   {event:'cmd_output',output:'Error: cannot find module @example\\nAuthorization: Bearer super-secret-value\\nERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\\n'},
+   {event:'cmd_finished',directive:'pnpm typecheck',exit_code:1},
+  ]});
+  if(url.endsWith('?detailed=true'))return response({
+   pipeline:{wf_id:workflowId,project_id:projectId},
+   blocks:[{name:'Bar validation',state:'DONE',result:'FAILED',jobs:[
+    {job_id:jobId,name:'Tests',status:'FINISHED',result:'FAILED'},
+   ]}],
+  });
+  return response({pipeline:{ppl_id:pipelineId,wf_id:workflowId,project_id:projectId,
+   state:'done',result:'failed',branch_name:barBranch,commit_sha:revision}});
+ });
+ assert.equal(calls.length,3);
+ assert.equal(result.result,'failed');
+ assert.equal(result.failure.jobId,jobId);
+ assert.equal(result.failure.failedCommand,'pnpm typecheck');
+ assert.equal(result.failure.exitCode,1);
+ assert.match(result.failure.diagnosticLines.join(' '),/cannot find module/);
+ assert.equal(JSON.stringify(result).includes('super-secret-value'),false);
+ assert.equal(JSON.stringify(result).includes(env.SEMAPHORE_TOKEN),false);
+ assert.equal(JSON.stringify(result).includes('https://'),false);
+});
+
 test('failed provider requests are redacted in the queue result and never replayed',async()=>{
  const kv=new KV();
  const c=command('trigger',{branch,mode:'validation',commitSha:revision});
