@@ -11,7 +11,7 @@ const SEMAPHORE_PIPELINES = Object.freeze({
   'ci/semaphore-validation-20261106': '.semaphore/semaphore.yml',
   development: '.semaphore/semaphore.yml',
   'codex/bar-bill-summary-20261107': '.semaphore/bar-bill-review.yml',
-  'codex/bar-bill-staging-isolated-20261108': '.semaphore/bar-bill-review.yml',
+  'codex/bar-bill-staging-live-base-20261108': '.semaphore/bar-bill-review.yml',
 });
 export const SEMAPHORE_BRANCHES = Object.freeze(Object.keys(SEMAPHORE_PIPELINES));
 
