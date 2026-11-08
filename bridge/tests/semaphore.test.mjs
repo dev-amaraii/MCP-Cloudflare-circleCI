@@ -150,7 +150,7 @@ test('failed owned Semaphore job yields bounded redacted command diagnostics',as
   calls.push(url);
   if(url.endsWith('/logs/'+jobId))return response({events:[
    {event:'cmd_started',directive:'pnpm typecheck'},
-   {event:'cmd_output',output:'Error: cannot find module @example\\nAuthorization: Bearer super-secret-value\\nERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\\n'},
+   {event:'cmd_output',output:'Error: cannot find module @example\\nError: Authorization: Bearer super-secret-value\\nERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\\n'},
    {event:'cmd_finished',directive:'pnpm typecheck',exit_code:1},
   ]});
   if(url.endsWith('?detailed=true'))return response({
