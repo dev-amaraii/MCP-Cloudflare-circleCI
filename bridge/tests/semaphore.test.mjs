@@ -11,6 +11,7 @@ const revision='a'.repeat(40);
 const now=Date.parse('2026-11-06T17:00:00Z');
 const branch='ci/semaphore-validation-20261106';
 const barBranch='codex/bar-bill-summary-20261107';
+const isolatedBranch='codex/bar-bill-staging-isolated-20261108';
 const command=(action,fields={})=>({
  v:1,id,action,project:'amaraii-os',provider:'semaphore',
  requestedAt:new Date(now).toISOString(),approved:true,...fields,
@@ -27,8 +28,9 @@ class KV {
 }
 
 test('Semaphore is opt-in, validation-only and pins the current pilot branch and exact revision',()=>{
- assert.deepEqual(SEMAPHORE_BRANCHES,[branch,'development',barBranch]);
+ assert.deepEqual(SEMAPHORE_BRANCHES,[branch,'development',barBranch,isolatedBranch]);
  assert.equal(validate(command('trigger',{branch:barBranch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
+ assert.equal(validate(command('trigger',{branch:isolatedBranch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  assert.equal(validate(command('trigger',{branch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  for(const patch of [
   {branch:'staging',mode:'validation',commitSha:revision},
@@ -36,6 +38,8 @@ test('Semaphore is opt-in, validation-only and pins the current pilot branch and
   {branch:barBranch,mode:'validation',commitSha:revision,pipeline_file:'.semaphore/semaphore.yml'},
   {branch:barBranch,mode:'validation',commitSha:revision,modeOverride:'release'},
   {branch:barBranch,mode:'qa_intel',commitSha:revision},
+  {branch:isolatedBranch,mode:'validation',commitSha:revision,pipeline_file:'.semaphore/semaphore.yml'},
+  {branch:isolatedBranch,mode:'release',commitSha:revision},
   {branch,mode:'validation'},
   {branch,mode:'qa_intel',commitSha:revision},
   {branch,mode:'validation',commitSha:'bad'},
@@ -96,6 +100,19 @@ test('Bar PR97 trigger selects only its fixed synthetic-only pipeline and SHA',a
    project_id:projectId,reference:'refs/heads/'+barBranch,
    commit_sha:revision,pipeline_file:'.semaphore/bar-bill-review.yml',
  });
+});
+
+test('isolated Bar PR98 is restricted to its reviewed pipeline and exact SHA',async()=>{
+ const sent=[];
+ const outcome=await execute(command('trigger',{branch:isolatedBranch,mode:'validation',commitSha:revision}),async(url,init)=>{
+  sent.push({url,body:JSON.parse(init.body)});
+  return response({workflow_id:workflowId,pipeline_id:pipelineId});
+ });
+ assert.equal(outcome.requestedRevision,revision);
+ assert.equal(sent.length,1);
+ assert.equal(sent[0].url,'https://amaraii.semaphoreci.com/api/v1alpha/plumber-workflows');
+ assert.deepEqual(sent[0].body,{project_id:projectId,reference:'refs/heads/'+isolatedBranch,
+  commit_sha:revision,pipeline_file:'.semaphore/bar-bill-review.yml'});
 });
 
 test('trigger rejects absent credentials, project IDs, upstream failures and malformed responses',async()=>{
