@@ -49,6 +49,35 @@ function safeValue(value, allowed) {
     ? value.toLowerCase() : null;
 }
 
+// Only a bounded subset of failed job output is returned to the private bridge.
+// Do not expose full logs, environment dumps, URLs, credentials or artifact links.
+function failureSummary(payload) {
+  const events=Array.isArray(payload.events)?payload.events.slice(0,6000):[];
+  let current=null,lastFailure=null;
+  for(const event of events){
+    if(!event||typeof event!=='object')continue;
+    if(event.event==='cmd_started') current={command:typeof event.directive==='string'?event.directive.slice(0,160):'',output:''};
+    if(event.event==='cmd_output'&&current&&typeof event.output==='string'){
+      current.output=(current.output+event.output.slice(0,4000)).slice(-12000);
+    }
+    if(event.event==='cmd_finished'&&current){
+      if(Number.isInteger(event.exit_code)&&event.exit_code!==0){
+        lastFailure={command:current.command,exitCode:event.exit_code,output:current.output};
+      }
+      current=null;
+    }
+  }
+  if(!lastFailure)return null;
+  const scrub=s=>s.replace(/https?:\\/\\/\\S+/g,'[url]')
+    .replace(/\\b(?:Authorization|Bearer|Token|Password|Secret|ApiKey)\\s*(?:[:=]|\\s)\\s*[^\\s]+/gi,'[redacted]')
+    .replace(/\\b(?:ghp_|github_pat_|sk-|semaphore_)[A-Za-z0-9_-]+/gi,'[redacted]')
+    .slice(0,240);
+  const lines=lastFailure.output.split(/\\r?\\n/).filter(Boolean);
+  const relevant=lines.filter(line=>/\\berror\\b|ERR_|fail|cannot |not found|missing|ENOENT|TS\\d+|assert|expected|denied|invalid|EACCES|SyntaxError|TypeError|\\bfatal\\b/i.test(line));
+  return {failedCommand:scrub(lastFailure.command),exitCode:lastFailure.exitCode,
+    diagnosticLines:(relevant.length?relevant:lines.slice(-6)).slice(-24).map(scrub)};
+}
+
 export async function executeSemaphore(env, command, requestFn = fetch) {
   if (command.action === 'health') {
     return {
@@ -102,7 +131,19 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
           result:safeValue(job.result,['passed','failed','stopped','canceled','skipped']),
         })),
       }));
+    const failed=blocks.flatMap(block=>block.jobs).find(job=>job.id&&job.result==='failed');
+    let failure=null;
+    if(failed) {
+      try {
+        const logs=await semaphoreRequest(env,'/logs/'+failed.id,undefined,requestFn);
+        const summary=failureSummary(logs);
+        failure=summary?{jobId:failed.id,...summary}:{jobId:failed.id,diagnostics:'No failed-command output available'};
+      } catch {
+        failure={jobId:failed.id,diagnostics:'Job diagnostic API unavailable'};
+      }
+    }
     return {
+      ...(failure?{failure}:{}),
       provider:'semaphore',pipelineId:command.pipelineId,
       workflowId:UUID.test(pipeline.wf_id || '') ? pipeline.wf_id : null,
       project:'amaraii-os',
