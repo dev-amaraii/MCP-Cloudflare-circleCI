@@ -68,7 +68,10 @@ function failureSummary(payload) {
     }
   }
   if(!lastFailure)return null;
-  const scrub=s=>s.replace(/https?:\/\/\S+/g,'[url]')
+  const scrub=s=>s.replace(/\bAuthorization\s*:\s*(?:Bearer|Token)\s+\S+/gi,'Authorization: [redacted]')
+    .replace(/\b(?:Bearer|Token)\s+\S+/gi,'[redacted]')
+    .replace(/\b(?:SEMAPHORE_TOKEN|CIRCLE_TOKEN|API_KEY|PASSWORD|SECRET|TOKEN)\s*[:=]\s*\S+/gi,'[redacted]')
+    .replace(/(?:https?|postgres(?:ql)?):\/\/\S+/gi,'[url]')
     .replace(/\b(?:Authorization|Bearer|Token|Password|Secret|ApiKey)\s*(?:[:=]|\s)\s*[^\s]+/gi,'[redacted]')
     .replace(/\b(?:ghp_|github_pat_|sk-|semaphore_)[A-Za-z0-9_-]+/gi,'[redacted]')
     .slice(0,240);
