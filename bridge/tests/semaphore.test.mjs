@@ -150,7 +150,7 @@ test('failed owned Semaphore job yields bounded redacted command diagnostics',as
   calls.push(url);
   if(url.endsWith('/logs/'+jobId))return response({events:[
    {event:'cmd_started',directive:'pnpm typecheck'},
-   {event:'cmd_output',output:'Error: cannot find module @example\\nError: Authorization: Bearer super-secret-value\\nERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\\n'},
+   {event:'cmd_output',output:'Error: cannot find module @example\\nBAR_TABS_OVERFLOW viewport=320 documentWidth=342\\nError: Authorization: Bearer super-secret-value\\nERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\\n'},
    {event:'cmd_finished',directive:'pnpm typecheck',exit_code:1},
   ]});
   if(url.endsWith('?detailed=true'))return response({
@@ -168,6 +168,7 @@ test('failed owned Semaphore job yields bounded redacted command diagnostics',as
  assert.equal(result.failure.failedCommand,'pnpm typecheck');
  assert.equal(result.failure.exitCode,1);
  assert.match(result.failure.diagnosticLines.join(' '),/cannot find module/);
+ assert.match(result.failure.diagnosticLines.join(' '),/BAR_TABS_OVERFLOW/);
  assert.equal(JSON.stringify(result).includes('super-secret-value'),false);
  assert.equal(JSON.stringify(result).includes(env.SEMAPHORE_TOKEN),false);
  assert.equal(JSON.stringify(result).includes('https://'),false);
