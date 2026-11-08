@@ -68,12 +68,12 @@ function failureSummary(payload) {
     }
   }
   if(!lastFailure)return null;
-  const scrub=s=>s.replace(/https?:\\/\\/\\S+/g,'[url]')
-    .replace(/\\b(?:Authorization|Bearer|Token|Password|Secret|ApiKey)\\s*(?:[:=]|\\s)\\s*[^\\s]+/gi,'[redacted]')
-    .replace(/\\b(?:ghp_|github_pat_|sk-|semaphore_)[A-Za-z0-9_-]+/gi,'[redacted]')
+  const scrub=s=>s.replace(/https?:\/\/\S+/g,'[url]')
+    .replace(/\b(?:Authorization|Bearer|Token|Password|Secret|ApiKey)\s*(?:[:=]|\s)\s*[^\s]+/gi,'[redacted]')
+    .replace(/\b(?:ghp_|github_pat_|sk-|semaphore_)[A-Za-z0-9_-]+/gi,'[redacted]')
     .slice(0,240);
-  const lines=lastFailure.output.split(/\\r?\\n/).filter(Boolean);
-  const relevant=lines.filter(line=>/\\berror\\b|ERR_|fail|cannot |not found|missing|ENOENT|TS\\d+|assert|expected|denied|invalid|EACCES|SyntaxError|TypeError|\\bfatal\\b/i.test(line));
+  const lines=lastFailure.output.split(/\r?\n/).filter(Boolean);
+  const relevant=lines.filter(line=>/\berror\b|ERR_|fail|cannot |not found|missing|ENOENT|TS\d+|assert|expected|denied|invalid|EACCES|SyntaxError|TypeError|\bfatal\b/i.test(line));
   return {failedCommand:scrub(lastFailure.command),exitCode:lastFailure.exitCode,
     diagnosticLines:(relevant.length?relevant:lines.slice(-6)).slice(-24).map(scrub)};
 }
