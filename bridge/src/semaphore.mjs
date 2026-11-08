@@ -58,7 +58,7 @@ function failureSummary(payload) {
     if(!event||typeof event!=='object')continue;
     if(event.event==='cmd_started') current={command:typeof event.directive==='string'?event.directive.slice(0,160):'',output:''};
     if(event.event==='cmd_output'&&current&&typeof event.output==='string'){
-      current.output=(current.output+event.output.slice(0,4000)).slice(-12000);
+      current.output=(current.output+event.output.slice(0,4000)).slice(-64000);
     }
     if(event.event==='cmd_finished'&&current){
       if(Number.isInteger(event.exit_code)&&event.exit_code!==0){
@@ -74,11 +74,12 @@ function failureSummary(payload) {
     .replace(/(?:https?|postgres(?:ql)?):\/\/\S+/gi,'[url]')
     .replace(/\b(?:Authorization|Bearer|Token|Password|Secret|ApiKey)\s*(?:[:=]|\s)\s*[^\s]+/gi,'[redacted]')
     .replace(/\b(?:ghp_|github_pat_|sk-|semaphore_)[A-Za-z0-9_-]+/gi,'[redacted]')
-    .slice(0,240);
+    .slice(0,800);
   const lines=lastFailure.output.split(/\r?\n/).filter(Boolean);
+  const focus=lines.filter(line=>/BAR_TABS_OVERFLOW|BAR_TABS_(?:QA|OPEN_RETRY)_STAGE|BAR_TAB_SETTLEMENT_QA_STAGE/i.test(line));
   const relevant=lines.filter(line=>/\berror\b|ERR_|fail|cannot |not found|missing|ENOENT|TS\d+|assert|expected|denied|invalid|EACCES|SyntaxError|TypeError|\bfatal\b/i.test(line));
   return {failedCommand:scrub(lastFailure.command),exitCode:lastFailure.exitCode,
-    diagnosticLines:(relevant.length?relevant:lines.slice(-6)).slice(-24).map(scrub)};
+    diagnosticLines:[...new Set([...focus.slice(-6),...(relevant.length?relevant.slice(-18):lines.slice(-6))])].slice(-24).map(scrub)};
 }
 
 export async function executeSemaphore(env, command, requestFn = fetch) {
