@@ -229,11 +229,11 @@ test('protected survey inspection reveals only numeric QA results, not full logs
   sent.push(url);
   if(url.endsWith('/logs/'+id))return response({events:[
     {event:'cmd_started',directive:'pnpm qa:intel:hosted:survey'},
-    {event:'cmd_output',output:'Bearer SECRET_DO_NOT_RETURN\\n'+JSON.stringify({
+    {event:'cmd_output',output:'Bearer SECRET_DO_NOT_RETURN\n'+JSON.stringify({
       runId,outcome:'SURVEY_COMPLETED_WITH_VISUAL_FINDINGS_TRACKED',
       completed:28,blocked:0,findings:2,output:'/tmp/private/qa-results',
       skippedApps:[{app:'games',reason:'not-admitted'}],
-      rawSecret:'SECRET_DO_NOT_RETURN'})+'\\n'},
+      rawSecret:'SECRET_DO_NOT_RETURN'})+'\n'},
     {event:'cmd_finished',exit_code:0},
   ]});
   if(url.endsWith('?detailed=true'))return response({pipeline:{wf_id:workflowId,project_id:projectId},
