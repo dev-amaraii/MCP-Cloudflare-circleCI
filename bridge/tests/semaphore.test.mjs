@@ -14,6 +14,7 @@ const barBranch='codex/bar-bill-summary-20261107';
 const liveBranch='codex/bar-bill-staging-live-base-20261108';
 const observeBranch='codex/qa-intel-hosted-observation-20261108';
 const protectedObserveBranch='ci/qa-intel-hosted-auth-20261108';
+const walkthroughBranch='codex/qa-intel-full-walkthrough-20261109';
 const command=(action,fields={})=>({
  v:1,id,action,project:'amaraii-os',provider:'semaphore',
  requestedAt:new Date(now).toISOString(),approved:true,...fields,
@@ -30,11 +31,12 @@ class KV {
 }
 
 test('Semaphore is opt-in, validation-only and pins the current pilot branch and exact revision',()=>{
- assert.deepEqual(SEMAPHORE_BRANCHES,[branch,'development',barBranch,liveBranch,observeBranch,protectedObserveBranch]);
+ assert.deepEqual(SEMAPHORE_BRANCHES,[branch,'development',barBranch,liveBranch,observeBranch,protectedObserveBranch,walkthroughBranch]);
  assert.equal(validate(command('trigger',{branch:barBranch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  assert.equal(validate(command('trigger',{branch:liveBranch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  assert.equal(validate(command('trigger',{branch:observeBranch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  assert.equal(validate(command('trigger',{branch:protectedObserveBranch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
+ assert.equal(validate(command('trigger',{branch:walkthroughBranch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  assert.equal(validate(command('trigger',{branch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  for(const patch of [
   {branch:'staging',mode:'validation',commitSha:revision},
@@ -47,6 +49,8 @@ test('Semaphore is opt-in, validation-only and pins the current pilot branch and
   {branch:liveBranch,mode:'release',commitSha:revision},
   {branch:observeBranch,mode:'release',commitSha:revision},
   {branch:protectedObserveBranch,mode:'release',commitSha:revision},
+  {branch:walkthroughBranch,mode:'release',commitSha:revision},
+  {branch:walkthroughBranch,mode:'validation',commitSha:revision,pipeline_file:'.semaphore/semaphore.yml'},
   {branch:protectedObserveBranch,mode:'validation',commitSha:revision,pipeline_file:'.semaphore/hosted-observer-review.yml'},
   {branch:observeBranch,mode:'validation',commitSha:revision,pipeline_file:'.semaphore/semaphore.yml'},
   {branch,mode:'validation'},
@@ -147,6 +151,16 @@ test('protected hosted observer is manual, exact-sha and fixed secret-scoped pip
   commit_sha:revision,pipeline_file:'.semaphore/hosted-auth-observe.yml'});
  assert.equal(sent.length,1);
  assert.throws(()=>validate(command('trigger',{branch:protectedObserveBranch,mode:'validation',commitSha:'bad'})));
+});
+
+test('walkthrough pipeline is restricted to fixed secret-free source review, not hosted execution',async()=>{
+ const sent=[];
+ const out=await execute(command('trigger',{branch:walkthroughBranch,mode:'validation',commitSha:revision}),async(url,init)=>{
+  sent.push(JSON.parse(init.body));return response({workflow_id:workflowId,pipeline_id:pipelineId});
+ });
+ assert.equal(out.requestedRevision,revision);
+ assert.deepEqual(sent,[{project_id:projectId,reference:'refs/heads/'+walkthroughBranch,
+  commit_sha:revision,pipeline_file:'.semaphore/qa-walkthrough-review.yml'}]);
 });
 
 test('trigger rejects absent credentials, project IDs, upstream failures and malformed responses',async()=>{
