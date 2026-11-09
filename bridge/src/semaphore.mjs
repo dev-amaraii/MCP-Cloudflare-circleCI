@@ -14,6 +14,7 @@ const SEMAPHORE_PIPELINES = Object.freeze({
   'codex/bar-bill-staging-live-base-20261108': '.semaphore/bar-bill-review.yml',
   'codex/qa-intel-hosted-observation-20261108': '.semaphore/hosted-observer-review.yml',
   'ci/qa-intel-hosted-auth-20261108': '.semaphore/hosted-auth-observe.yml',
+  'codex/qa-intel-full-walkthrough-20261109': '.semaphore/qa-walkthrough-review.yml',
 });
 export const SEMAPHORE_BRANCHES = Object.freeze(Object.keys(SEMAPHORE_PIPELINES));
 
