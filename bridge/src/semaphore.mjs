@@ -87,6 +87,37 @@ function failureSummary(payload) {
     diagnosticLines:[...new Set([...focus.slice(-6),...(relevant.length?relevant.slice(-18):lines.slice(-6))])].slice(-24).map(scrub)};
 }
 
+/**
+ * Extract only bounded, non-sensitive QA results from the job's stdout.
+ * The underlying logs can contain tokens, URLs and customer data; never return
+ * them, and only inspect exact project-owned protected-survey jobs.
+ */
+function safeQaSurveySummary(logs) {
+  const events=Array.isArray(logs?.events)?logs.events.slice(-6000):[];
+  const tail=events.filter(e=>e?.event==='cmd_output'&&typeof e.output==='string')
+    .map(e=>e.output.slice(0,2500)).join('').slice(-32000);
+  for(const line of tail.split(/\r?\n/).slice(-250).reverse()){
+    const sample=line.trim();
+    if(!sample.startsWith('{"runId":')||sample.length>4000)continue;
+    let data;
+    try { data=JSON.parse(sample); } catch { continue; }
+    const valid=Number.isInteger(data.completed)&&data.completed>=0&&data.completed<=500&&
+      Number.isInteger(data.blocked)&&data.blocked>=0&&data.blocked<=500&&
+      Number.isInteger(data.findings)&&data.findings>=0&&data.findings<=500;
+    if(!UUID.test(data.runId||'')||!valid||
+      !['SURVEY_COMPLETED_WITH_VISUAL_FINDINGS_TRACKED','PARTIAL_WITH_BLOCKERS','BLOCKED'].includes(data.outcome))continue;
+    const allowedApps=['gymnalysis','bookings','hospitality','games'];
+    const allowedReasons=['not-admitted','not-entitled','branch-not-admitted'];
+    const skipped=(Array.isArray(data.skippedApps)?data.skippedApps:[]).slice(0,4)
+      .filter(x=>allowedApps.includes(x?.app)&&allowedReasons.includes(x?.reason))
+      .map(x=>({app:x.app,reason:x.reason}));
+    return {runId:data.runId,outcome:data.outcome,
+      completed:data.completed,blocked:data.blocked,findings:data.findings,
+      skippedApps:skipped};
+  }
+  return null;
+}
+
 export async function executeSemaphore(env, command, requestFn = fetch) {
   if (command.action === 'health') {
     return {
@@ -141,6 +172,18 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
         })),
       }));
     const failed=blocks.flatMap(block=>block.jobs).find(job=>job.id&&job.result==='failed');
+    // Survey summaries are read only after the same project/branch ownership
+    // validation above. Never return arbitrary job logs or signed artifact URLs.
+    const surveyJob=pipeline.branch_name==='ci/qa-intel-walkthrough-survey-20261109'&&
+      pipeline.state?.toLowerCase()==='done'?
+      blocks.flatMap(block=>block.jobs).find(job=>job.id&&
+        job.name==='Authenticated four-viewport survey; preserve findings without UI fixes'&&
+        job.status==='finished'):null;
+    let survey=null;
+    if(surveyJob){
+      try { survey=safeQaSurveySummary(await semaphoreRequest(env,'/logs/'+surveyJob.id,undefined,requestFn)); }
+      catch { survey=null; }
+    }
     let failure=null;
     if(failed) {
       try {
@@ -153,6 +196,7 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
     }
     return {
       ...(failure?{failure}:{}),
+      ...(survey?{survey}:{}),
       provider:'semaphore',pipelineId:command.pipelineId,
       workflowId:UUID.test(pipeline.wf_id || '') ? pipeline.wf_id : null,
       project:'amaraii-os',
