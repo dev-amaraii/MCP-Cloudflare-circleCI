@@ -130,6 +130,49 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
     };
   }
   const id = projectId(env);
+  if (command.action === 'semaphore_artifacts') {
+    // Verify tenant and an exact protected QA browser branch BEFORE reading
+    // any artifact metadata. No artifact URL or raw file content is returned.
+    const basics=await semaphoreRequest(env,'/pipelines/'+command.pipelineId,undefined,requestFn);
+    const pipeline=basics.pipeline;
+    if (!pipeline||pipeline.project_id!==id||
+        (pipeline.ppl_id&&pipeline.ppl_id!==command.pipelineId))
+      throw new Error('Semaphore project mismatch');
+    if (!['ci/qa-intel-walkthrough-survey-20261109',
+          'ci/qa-intel-hosted-auth-20261108'].includes(pipeline.branch_name))
+      throw new Error('Semaphore QA artifact access not permitted');
+    const detailed=await semaphoreRequest(env,'/pipelines/'+command.pipelineId+'?detailed=true',
+      undefined,requestFn);
+    if (detailed.pipeline?.project_id&&detailed.pipeline.project_id!==id)
+      throw new Error('Semaphore project mismatch');
+    const workflowId=pipeline.wf_id;
+    if (!UUID.test(workflowId||'')||
+        (detailed.pipeline?.wf_id&&detailed.pipeline.wf_id!==workflowId))
+      throw new Error('Semaphore project mismatch');
+    if (command.jobId) {
+      const jobs=(Array.isArray(detailed.blocks)?detailed.blocks:[])
+        .flatMap(block=>Array.isArray(block.jobs)?block.jobs:[]);
+      if (!jobs.some(job=>job.job_id===command.jobId&&
+          ['Authenticated four-viewport survey; preserve findings without UI fixes',
+           'Protected hosted QA auth walkthrough'].includes(job.name)))
+        throw new Error('Semaphore QA artifact access not permitted');
+    }
+    const scope=command.jobId?'jobs':'workflows';
+    const scopeId=command.jobId||workflowId;
+    const path=command.artifactPath||'qa-intel';
+    const params='?scope='+scope+'&scope_id='+scopeId+'&path='+encodeURIComponent(path);
+    const data=await semaphoreRequest(env,'/artifacts'+params,undefined,requestFn);
+    const safePath=p=>typeof p==='string'&&p.length<=240&&
+      /^qa-intel\/[a-zA-Z0-9._/-]+$/.test(p)&&
+      !p.includes('..')&&!p.includes('//');
+    const artifacts=(Array.isArray(data.artifacts)?data.artifacts:[])
+      .filter(x=>safePath(x?.path))
+      .slice(0,80).map(x=>({path:x.path,directory:x.is_directory===true,
+        size:x.is_directory===true?null:
+          Number.isInteger(x.size)&&x.size>=0&&x.size<=10000000?x.size:null}));
+    return {project:'amaraii-os',provider:'semaphore',pipelineId:command.pipelineId,
+      scope,scopeId,folder:path,artifacts};
+  }
   if (command.action === 'trigger') {
     const response = await semaphoreRequest(env, '/plumber-workflows', {
       project_id:id,
