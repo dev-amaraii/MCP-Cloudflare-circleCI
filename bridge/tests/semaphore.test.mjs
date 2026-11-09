@@ -221,6 +221,36 @@ test('inspect returns bounded job metadata, verified revision, and no raw logs o
  assert.equal(JSON.stringify(result).includes('sensitive.example'),false);
 });
 
+test('protected survey inspection reveals only numeric QA results, not full logs',async()=>{
+ const id='55555555-6666-4777-8888-999999999999';
+ const runId='14bcf147-725e-49ee-aed3-b54faf93df1c';
+ const sent=[];
+ const r=await execute(command('inspect',{pipelineId}),async url=>{
+  sent.push(url);
+  if(url.endsWith('/logs/'+id))return response({events:[
+    {event:'cmd_started',directive:'pnpm qa:intel:hosted:survey'},
+    {event:'cmd_output',output:'Bearer SECRET_DO_NOT_RETURN\\n'+JSON.stringify({
+      runId,outcome:'SURVEY_COMPLETED_WITH_VISUAL_FINDINGS_TRACKED',
+      completed:28,blocked:0,findings:2,output:'/tmp/private/qa-results',
+      skippedApps:[{app:'games',reason:'not-admitted'}],
+      rawSecret:'SECRET_DO_NOT_RETURN'})+'\\n'},
+    {event:'cmd_finished',exit_code:0},
+  ]});
+  if(url.endsWith('?detailed=true'))return response({pipeline:{wf_id:workflowId,project_id:projectId},
+    blocks:[{name:'Protected survey',state:'DONE',result:'PASSED',jobs:[
+      {job_id:id,name:'Authenticated four-viewport survey; preserve findings without UI fixes',
+        status:'FINISHED',result:'PASSED'}
+    ]}]});
+  return response({pipeline:{ppl_id:pipelineId,wf_id:workflowId,project_id:projectId,
+    state:'done',result:'passed',branch_name:protectedSurveyBranch,commit_sha:revision}});
+ });
+ assert.equal(sent.length,3);
+ assert.deepEqual(r.survey,{runId,outcome:'SURVEY_COMPLETED_WITH_VISUAL_FINDINGS_TRACKED',
+  completed:28,blocked:0,findings:2,skippedApps:[{app:'games',reason:'not-admitted'}]});
+ assert.equal(JSON.stringify(r).includes('SECRET_DO_NOT_RETURN'),false);
+ assert.equal(JSON.stringify(r).includes('/tmp/private'),false);
+});
+
 test('failed owned Semaphore job yields bounded redacted command diagnostics',async()=>{
  const jobId='55555555-6666-4777-8888-999999999999';
  const calls=[];
