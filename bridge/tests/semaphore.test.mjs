@@ -199,6 +199,56 @@ test('trigger rejects absent credentials, project IDs, upstream failures and mal
  await assert.rejects(execute(cmd,async()=>response({workflow_id:'bad',pipeline_id:pipelineId})),/Invalid Semaphore response/);
 });
 
+test('Semaphore QA artifact listing verifies owned pipeline and only returns safe filenames',async()=>{
+ const jobId='99999999-1111-4111-8111-111111111111';
+ const c=command('semaphore_artifacts',{
+  pipelineId,jobId,artifactPath:'qa-intel/survey-report'});
+ assert.equal(validate(c).project,PROJECTS['amaraii-os']);
+ const called=[];
+ const output=await execute(c,async url=>{
+  called.push(url);
+  if(url.endsWith('/artifacts?scope=jobs&scope_id='+jobId+
+      '&path=qa-intel%2Fsurvey-report'))
+    return response({artifacts:[
+      {name:'report.json',path:'qa-intel/survey-report/report.json',size:256,is_directory:false},
+      {name:'invalid',path:'qa-intel/../private/token.txt',size:99,is_directory:false},
+      {name:'private',path:'other/private.json',size:2,is_directory:false}
+    ]});
+  if(url.endsWith('?detailed=true'))return response({pipeline:{
+    wf_id:workflowId,project_id
+   },blocks:[{name:'Protected survey',jobs:[{job_id:jobId,
+     name:'Authenticated four-viewport survey; preserve findings without UI fixes'}]}]});
+  return response({pipeline:{ppl_id:pipelineId,wf_id:workflowId,
+    project_id:projectId,branch_name:protectedSurveyBranch}});
+ });
+ assert.equal(called.length,3);
+ assert.equal(output.scope,'jobs');
+ assert.deepEqual(output.artifacts,[{path:'qa-intel/survey-report/report.json',
+   directory:false,size:256}]);
+ assert.ok(!JSON.stringify(output).includes('private/token'));
+});
+test('Semaphore artifact listing rejects unsafe paths, foreign branches and foreign jobs',async()=>{
+ for(const artifactPath of ['../secrets','qa-intel/../../secrets','agent',
+   '/qa-intel','qa-intel/foo','qa-intel/survey-report/../../../env']) {
+  assert.throws(()=>validate(command('semaphore_artifacts',{pipelineId,artifactPath})),
+   /listing not permitted/);
+ }
+ assert.throws(()=>validate(command('semaphore_artifacts',{pipelineId,
+  jobId:'not-a-uuid'})));
+ const basic=fields=>response({pipeline:{ppl_id:pipelineId,wf_id:workflowId,
+  project_id:projectId,...fields}});
+ await assert.rejects(execute(command('semaphore_artifacts',{pipelineId}),
+  async()=>basic({branch_name:'development'})),/access not permitted/);
+ await assert.rejects(execute(command('semaphore_artifacts',{pipelineId}),
+  async()=>basic({project_id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    branch_name:protectedSurveyBranch})),/project mismatch/);
+ await assert.rejects(execute(command('semaphore_artifacts',{
+  pipelineId,jobId:'99999999-1111-4111-8111-111111111111'}),
+  async url=>url.endsWith('?detailed=true')?
+    response({pipeline:{wf_id:workflowId,project_id:projectId},blocks:[]}):
+    basic({branch_name:protectedSurveyBranch})),/access not permitted/);
+});
+
 test('inspect validates project ownership before detailed job lookup',async()=>{
  const calls=[];
  const cmd=command('inspect',{pipelineId});
