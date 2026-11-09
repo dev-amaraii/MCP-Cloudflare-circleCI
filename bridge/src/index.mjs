@@ -213,7 +213,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
   if (provider === 'semaphore' &&
-      (command.project !== 'amaraii-os' || !['health','trigger','inspect','semaphore_artifacts'].includes(command.action))) {
+      (command.project !== 'amaraii-os' || !['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action))) {
     throw new Error('Semaphore action not permitted');
   }
   if (command.action === 'health') {
@@ -310,6 +310,15 @@ export function validateCommand(command, keyId, now = Date.now()) {
     if (command.branch !== undefined || command.mode !== undefined || command.pipelineId !== undefined ||
         command.commitSha !== undefined || command.startNumber !== undefined) throw new Error('Job inspection has unexpected fields');
     return { command, project };
+  }
+  if (command.action === 'semaphore_png') {
+    if (provider!=='semaphore' || typeof command.pipelineId!=='string' || !UUID.test(command.pipelineId) ||
+      typeof command.artifactPath!=='string' ||
+      !/^qa-intel\/screenshots\/(?:screenshots\/)?[A-Za-z0-9_-]{1,110}\.png$/.test(command.artifactPath) ||
+      command.branch!==undefined||command.mode!==undefined||command.commitSha!==undefined||
+      command.jobId!==undefined||command.jobNumber!==undefined||command.startNumber!==undefined)
+      throw new Error('Semaphore artifact preview not permitted');
+    return {command,project};
   }
   if (command.action === 'semaphore_artifacts') {
     const dirs=['qa-intel','qa-intel/survey-report','qa-intel/survey-findings',
@@ -758,7 +767,7 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
       'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields', 'Audit command has unexpected fields', 'Invalid starting pipeline number',
       'Invalid release revision', 'Release command has unexpected fields', 'Invalid job number', 'Job inspection has unexpected fields', 'Job project mismatch',
       'Invalid job identity', 'Job steps have unexpected fields', 'Job does not belong to approved pipeline', 'Job identity mismatch',
-      'Semaphore artifact listing not permitted', 'Artifact preview not permitted', 'Artifact not found', 'Artifact too large', 'Artifact format not supported', 'Artifact download failed', 'Unsafe artifact URL',
+      'Semaphore artifact listing not permitted', 'Semaphore artifact preview not permitted', 'Semaphore QA artifact access not permitted', 'Artifact preview not permitted', 'Artifact not found', 'Artifact too large', 'Artifact format not supported', 'Artifact download failed', 'Unsafe artifact URL',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
