@@ -199,6 +199,68 @@ test('trigger rejects absent credentials, project IDs, upstream failures and mal
  await assert.rejects(execute(cmd,async()=>response({workflow_id:'bad',pipeline_id:pipelineId})),/Invalid Semaphore response/);
 });
 
+test('Semaphore PNG preview requires synthetic QA screenshot path and exact owned workflow',async()=>{
+ const filename='qa-intel/screenshots/hospitality-tabs-390.png';
+ const commandInput=command('semaphore_png',{pipelineId,artifactPath:filename});
+ assert.equal(validate(commandInput).project,PROJECTS['amaraii-os']);
+ for(const path of ['qa-intel/survey-report','qa-intel/screenshots/../env.png',
+  'qa-intel/screenshots/customer.txt','qa-intel/screenshots/s3cr3t.png?url=evil',
+  'other/screenshots/hospitality-tabs-390.png'])
+  assert.throws(()=>validate(command('semaphore_png',{pipelineId,artifactPath:path})),
+    /preview not permitted/);
+ assert.throws(()=>validate(command('semaphore_png',{pipelineId,artifactPath:filename,
+   jobId:'99999999-1111-4111-8111-111111111111'})));
+ const data=new Uint8Array(120);
+ data.set([137,80,78,71,13,10,26,10],0);
+ // PNG header width 390, height 900.
+ data.set([0,0,1,134,0,0,3,132],16);
+ const privateSignedUrl='https://storage.googleapis.com/semaphore-signed/qa.png?X-Goog-Signature=PRIVATE';
+ const called=[];
+ const result=await execute(commandInput,async url=>{
+  called.push(url);
+  if(url===privateSignedUrl)return new Response(data,{status:200,headers:{
+    'Content-Type':'image/png','Content-Length':String(data.length)}});
+  if(url.includes('/artifacts/signed_url?'))return response({items:[
+    {path:filename,url:privateSignedUrl}]});
+  if(url.includes('/artifacts?'))return response({artifacts:[
+    {name:'hospitality-tabs-390.png',path:filename,is_directory:false,size:data.length}]});
+  if(url.endsWith('?detailed=true'))return response({pipeline:{wf_id:workflowId,
+    project_id:projectId},blocks:[{jobs:[{job_id:'99999999-1111-4111-8111-111111111111',
+    name:'Authenticated four-viewport survey; preserve findings without UI fixes',
+    status:'FINISHED'}]}]});
+  return response({pipeline:{ppl_id:pipelineId,wf_id:workflowId,
+    project_id:projectId,branch_name:protectedSurveyBranch}});
+ });
+ assert.equal(called.length,5);
+ assert.equal(result.width,390);
+ assert.equal(result.height,900);
+ assert.equal(result.bytes,120);
+ assert.equal(result.mediaType,'image/png');
+ assert.equal(Buffer.from(result.dataBase64,'base64').length,120);
+ assert.equal(JSON.stringify(result).includes('X-Goog-Signature'),false);
+ assert.equal(JSON.stringify(result).includes(env.SEMAPHORE_TOKEN),false);
+});
+test('Semaphore screenshot preview cannot access wrong branch or unsafe signed URL',async()=>{
+ const filename='qa-intel/screenshots/hospitality-tabs-390.png';
+ await assert.rejects(execute(command('semaphore_png',{pipelineId,artifactPath:filename}),
+  async()=>response({pipeline:{ppl_id:pipelineId,wf_id:workflowId,
+    project_id:projectId,branch_name:'development'}})),/access not permitted/);
+ const fn=async url=>{
+  if(url.includes('/artifacts/signed_url?'))return response({items:[{path:filename,
+    url:'http://127.0.0.1/private'}]});
+  if(url.includes('/artifacts?'))return response({artifacts:[{path:filename,
+    is_directory:false,size:120}]});
+  if(url.endsWith('?detailed=true'))return response({pipeline:{
+    wf_id:workflowId,project_id:projectId},blocks:[{jobs:[{job_id:id,
+      name:'Authenticated four-viewport survey; preserve findings without UI fixes',
+      status:'finished'}]}]});
+  return response({pipeline:{ppl_id:pipelineId,wf_id:workflowId,
+    project_id:projectId,branch_name:protectedSurveyBranch}});
+ };
+ await assert.rejects(execute(command('semaphore_png',{pipelineId,
+   artifactPath:filename}),fn),/Unsafe artifact URL/);
+});
+
 test('Semaphore QA artifact listing verifies owned pipeline and only returns safe filenames',async()=>{
  const jobId='99999999-1111-4111-8111-111111111111';
  const c=command('semaphore_artifacts',{
