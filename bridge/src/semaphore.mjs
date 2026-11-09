@@ -16,6 +16,7 @@ const SEMAPHORE_PIPELINES = Object.freeze({
   'ci/qa-intel-hosted-auth-20261108': '.semaphore/hosted-auth-observe.yml',
   'codex/qa-intel-full-walkthrough-20261109': '.semaphore/qa-walkthrough-review.yml',
   'ci/qa-intel-walkthrough-survey-20261109': '.semaphore/qa-walkthrough-run.yml',
+  'codex/qa-intel-bar-synthetic-transactions-20261109': '.semaphore/qa-bar-synthetic-review.yml',
 });
 export const SEMAPHORE_BRANCHES = Object.freeze(Object.keys(SEMAPHORE_PIPELINES));
 
