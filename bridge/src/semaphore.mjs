@@ -50,6 +50,64 @@ async function semaphoreRequest(env, path, body, requestFn) {
   return data;
 }
 
+// Semaphore API signed artifact links are consumed inside this private Worker.
+// Never return a signed URL, redirect to caller-supplied hosts, or send the
+// Semaphore API credential to cloud storage. Synthetic QA screenshots only.
+const PNG_MAX_BYTES=1600000;
+function trustedSemaphoreArtifactHost(url){
+  const host=url.hostname.toLowerCase();
+  return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&(
+    host==='storage.googleapis.com'||host.endsWith('.storage.googleapis.com')||
+    host==='s3.amazonaws.com'||host.endsWith('.s3.amazonaws.com')||
+    /^[a-z0-9.-]+\.s3\.[a-z0-9-]+\.amazonaws\.com$/.test(host)||
+    host==='artifacts.semaphoreci.com'||host.endsWith('.artifacts.semaphoreci.com')
+  );
+}
+async function downloadSyntheticQaPng(signedUrl,requestFn=fetch){
+  let url;
+  try{url=new URL(signedUrl);}catch{throw Error('Unsafe artifact URL');}
+  for(let i=0;i<3;i++){
+    if(!trustedSemaphoreArtifactHost(url))throw Error('Unsafe artifact URL');
+    const response=await requestFn(url.toString(),{
+      method:'GET',redirect:'manual',headers:{Accept:'image/png'}});
+    if([301,302,303,307,308].includes(response.status)){
+      const location=response.headers.get('location');
+      if(!location)throw Error('Artifact download failed');
+      url=new URL(location,url);
+      continue;
+    }
+    if(!response.ok||!response.body)throw Error('Artifact download failed');
+    const announced=Number(response.headers.get('content-length')||0);
+    if(!Number.isFinite(announced)||announced>PNG_MAX_BYTES)throw Error('Artifact too large');
+    const type=response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()||'';
+    if(type&&!['image/png','application/octet-stream'].includes(type))
+      throw Error('Artifact format not supported');
+    const chunks=[],reader=response.body.getReader();
+    let count=0;
+    for(;;){
+      const {done,value}=await reader.read();
+      if(done)break;
+      count+=value.length;
+      if(count>PNG_MAX_BYTES){await reader.cancel();throw Error('Artifact too large');}
+      chunks.push(value);
+    }
+    if(count<33)throw Error('Artifact format not supported');
+    const bytes=new Uint8Array(count);let p=0;
+    for(const part of chunks){bytes.set(part,p);p+=part.length;}
+    const png=[137,80,78,71,13,10,26,10];
+    if(!png.every((v,i)=>bytes[i]===v))throw Error('Artifact format not supported');
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    const width=view.getUint32(16),height=view.getUint32(20);
+    if(width<320||width>2000||height<400||height>20000)
+      throw Error('Artifact format not supported');
+    let binary='';
+    for(let i=0;i<bytes.length;i+=16000)
+      binary+=String.fromCharCode(...bytes.subarray(i,i+16000));
+    return {mediaType:'image/png',width,height,bytes:count,dataBase64:btoa(binary)};
+  }
+  throw Error('Artifact download failed');
+}
+
 function safeValue(value, allowed) {
   return typeof value === 'string' && allowed.includes(value.toLowerCase())
     ? value.toLowerCase() : null;
@@ -130,6 +188,49 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
     };
   }
   const id = projectId(env);
+  if(command.action==='semaphore_png'){
+    const base=await semaphoreRequest(env,'/pipelines/'+command.pipelineId,
+      undefined,requestFn);
+    const pipeline=base.pipeline;
+    if(!pipeline||pipeline.project_id!==id||
+      (pipeline.ppl_id&&pipeline.ppl_id!==command.pipelineId))
+      throw Error('Semaphore project mismatch');
+    if(pipeline.branch_name!=='ci/qa-intel-walkthrough-survey-20261109')
+      throw Error('Semaphore QA artifact access not permitted');
+    const workflowId=pipeline.wf_id;
+    if(!UUID.test(workflowId||''))throw Error('Semaphore project mismatch');
+    const detailed=await semaphoreRequest(env,'/pipelines/'+command.pipelineId+
+      '?detailed=true',undefined,requestFn);
+    if(detailed.pipeline?.project_id&&detailed.pipeline.project_id!==id)
+      throw Error('Semaphore project mismatch');
+    if(detailed.pipeline?.wf_id&&detailed.pipeline.wf_id!==workflowId)
+      throw Error('Semaphore project mismatch');
+    const jobs=(Array.isArray(detailed.blocks)?detailed.blocks:[])
+      .flatMap(x=>Array.isArray(x.jobs)?x.jobs:[]);
+    if(!jobs.some(x=>x.name===
+      'Authenticated four-viewport survey; preserve findings without UI fixes'&&
+      x.status?.toLowerCase()==='finished'&&
+      UUID.test(x.job_id||'')))
+      throw Error('Semaphore QA artifact access not permitted');
+    const q='?scope=workflows&scope_id='+workflowId;
+    const listing=await semaphoreRequest(env,'/artifacts'+q+
+      '&path=qa-intel%2Fscreenshots',undefined,requestFn);
+    const entry=(Array.isArray(listing.artifacts)?listing.artifacts:[])
+      .find(x=>x.path===command.artifactPath&&x.is_directory===false);
+    if(!entry)throw Error('Artifact not found');
+    if(Number.isInteger(entry.size)&&entry.size>PNG_MAX_BYTES)
+      throw Error('Artifact too large');
+    const urls=await semaphoreRequest(env,'/artifacts/signed_url'+q+
+      '&path='+encodeURIComponent(command.artifactPath)+'&method=GET',
+      undefined,requestFn);
+    const signed=(Array.isArray(urls.items)?urls.items:[])
+      .find(x=>x.path===command.artifactPath&&typeof x.url==='string');
+    if(!signed)throw Error('Artifact not found');
+    const png=await downloadSyntheticQaPng(signed.url,requestFn);
+    return {project:'amaraii-os',provider:'semaphore',pipelineId:command.pipelineId,
+      path:command.artifactPath,...png};
+  }
+
   if (command.action === 'semaphore_artifacts') {
     // Verify tenant and an exact protected QA browser branch BEFORE reading
     // any artifact metadata. No artifact URL or raw file content is returned.
