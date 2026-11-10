@@ -179,3 +179,17 @@ test('detailed NEN pipeline mismatch fails before reading child jobs and artifac
     /detailed pipeline identity mismatch/);
   assert.equal(calls.length,2);
 });
+
+test('typed NEN ownership category is private even if an upstream pipeline refers to another project',async()=>{
+  const values=new Map();
+  const kv={get:async key=>values.get(key)??null,put:async(key,val)=>{values.set(key,val);},
+    delete:async key=>values.delete(key)};
+  const c=command('inspect',{pipelineId:pipeline});
+  const result=await processRequest({QUEUE:kv,...env},id,JSON.stringify(c),now,
+    async()=>response({pipeline:{ppl_id:pipeline,project_id:otherProject,wf_id:workflow,
+      internalSecret:env.SEMAPHORE_TOKEN}}));
+  assert.equal(result.status,'error');
+  assert.equal(result.error,'NEN Semaphore project identity mismatch');
+  assert.ok(!JSON.stringify(result).includes(otherProject));
+  assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
+});
