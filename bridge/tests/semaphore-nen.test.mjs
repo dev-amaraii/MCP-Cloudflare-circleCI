@@ -276,6 +276,7 @@ test('NEN preview preflight emits only safe missing/denied categories, never raw
   for (const [diagnostic, expected] of [
     ['NEN_PREVIEW_AUTH_REQUIRED','preview_credential_missing'],
     ['NEN_PREVIEW_AUTH_DENIED','preview_authentication_denied'],
+    ['Generic Vercel authentication notice',null],
   ]) {
     const events=[
       {event:'cmd_output',output:diagnostic+' credential='+env.SEMAPHORE_TOKEN},
@@ -288,7 +289,7 @@ test('NEN preview preflight emits only safe missing/denied categories, never raw
       throw Error('Unexpected NEN mock resource');
     };
     const out=await executeSemaphoreNen(env,command('nen_job_diagnostics',{pipelineId:pipeline,jobId:job}),read);
-    assert.deepEqual(out.errorKinds,[expected]);
+    assert.deepEqual(out.errorKinds,expected?[expected]:[]);
     assert.ok(!JSON.stringify(out).includes(env.SEMAPHORE_TOKEN));
     assert.equal(out.failedCommands[0].exitCode,2);
   }
