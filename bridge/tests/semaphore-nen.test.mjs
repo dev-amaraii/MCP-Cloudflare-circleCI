@@ -268,7 +268,7 @@ test('NEN preview submission requires approval and cannot switch CI providers',(
 
 test('NEN preview pin is the reviewed protected-auth PR40 revision',()=>{
   assert.equal(NEN_PREVIEW.branch,'fix/nen-mobile-footer-overflow-20261110');
-  assert.equal(NEN_PREVIEW.commitSha,'ea04f646900b786f1f0a6be733dc90bcf127ff7f');
+  assert.equal(NEN_PREVIEW.commitSha,'7413ef8417f0b3c8f488ae9462633d837cae45b7');
   assert.equal(NEN_PREVIEW.pipelineFile,'.semaphore/semaphore.yml');
 });
 
