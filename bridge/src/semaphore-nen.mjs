@@ -6,7 +6,7 @@
 const API = 'https://amaraii.semaphoreci.com/api/v1alpha';
 export const NEN_PREVIEW = Object.freeze({
   branch:'fix/nen-mobile-footer-overflow-20261110',
-  commitSha:'7413ef8417f0b3c8f488ae9462633d837cae45b7',
+  commitSha:'6b1b6d57e43f55350b0e67ee690e0c2a852bcb54',
   base:'https://nen-website-cms-staging-git-fix-nen-mobile-fe8706-amaraii-team.vercel.app',
   pipelineFile:'.semaphore/semaphore.yml',
 });
@@ -225,7 +225,7 @@ function safeLog(events) {
     if (/NEN_PREVIEW_AUTH_REQUIRED/.test(output))errorKinds.add('preview_credential_missing');
     if (/NEN_PREVIEW_AUTH_DENIED/.test(output)) {
       errorKinds.add('preview_authentication_denied');
-      const preflight = output.match(/NEN_PREVIEW_AUTH_DENIED:\s*(http_unavailable|vercel_login|unexpected_origin|navigation_or_heading_timeout)\b/);
+      const preflight = output.match(/NEN_PREVIEW_AUTH_DENIED:\s*(http_unavailable|vercel_login|unexpected_origin|navigation_or_heading_timeout|navigation_error)\b/);
       if (preflight) errorKinds.add('preview_preflight_'+preflight[1]);
     }
   }
