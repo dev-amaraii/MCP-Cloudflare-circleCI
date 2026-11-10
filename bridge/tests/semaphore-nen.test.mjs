@@ -294,3 +294,20 @@ test('NEN preview preflight emits only safe missing/denied categories, never raw
     assert.equal(out.failedCommands[0].exitCode,2);
   }
 });
+
+test('NEN preview detail exposes only fixed preflight categories',async()=>{
+  const reasons=['http_unavailable','vercel_login','unexpected_origin','navigation_or_heading_timeout'];
+  for(const reason of reasons) {
+    const events=[{event:'cmd_output',output:'NEN_PREVIEW_AUTH_DENIED: '+reason+' secret='+env.SEMAPHORE_TOKEN},
+      {event:'cmd_finished',directive:'other',exit_code:2}];
+    const read=async url=>{
+      if(url===base+'/pipelines/'+pipeline)return response({pipeline:{ppl_id:pipeline,project_id:projectId,wf_id:workflow}});
+      if(url===base+'/pipelines/'+pipeline+'?detailed=true')return response({pipeline:{project_id:projectId,wf_id:workflow},blocks:[{jobs:[{job_id:job}]}]});
+      if(url===base+'/logs/'+job)return response({events});
+      throw Error('Unexpected log URL');
+    };
+    const out=await executeSemaphoreNen(env,command('nen_job_diagnostics',{pipelineId:pipeline,jobId:job}),read);
+    assert.deepEqual(out.errorKinds,['preview_authentication_denied','preview_preflight_'+reason]);
+    assert.ok(!JSON.stringify(out).includes(env.SEMAPHORE_TOKEN));
+  }
+});
