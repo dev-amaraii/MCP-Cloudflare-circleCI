@@ -222,6 +222,8 @@ function safeLog(events) {
     if (/EAI_AGAIN|ENOTFOUND|ETIMEDOUT/i.test(output))errorKinds.add('network');
     if (/Permission denied|EACCES|EPERM/.test(output))errorKinds.add('permissions');
     if (/artifact.*(not found|failed|permission)/i.test(output))errorKinds.add('artifact_upload');
+    if (/NEN_PREVIEW_AUTH_REQUIRED/.test(output))errorKinds.add('preview_credential_missing');
+    if (/NEN_PREVIEW_AUTH_DENIED/.test(output))errorKinds.add('preview_authentication_denied');
   }
   return {failedCommands:failedCommands.slice(0,12),errorKinds:[...errorKinds],outputEventsExamined:failureOutputs};
 }
