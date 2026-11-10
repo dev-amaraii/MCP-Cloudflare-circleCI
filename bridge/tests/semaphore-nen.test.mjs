@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {executeSemaphoreNen,NEN_SCREENSHOT} from '../src/semaphore-nen.mjs';
-import {validateCommand,executeCommand} from '../src/index.mjs';
+import {validateCommand,executeCommand,processRequest} from '../src/index.mjs';
 const id='11111111-2222-4333-8444-555555555555';
 const pipeline='11111111-2222-4333-8444-555555555551';
 const workflow='11111111-2222-4333-8444-555555555552';
@@ -127,4 +127,17 @@ test('missing NEN project binding fails before any Semaphore API request',async(
     command('inspect',{pipelineId:pipeline}),()=>{called=true;throw Error('API must not be called');}),
     /NEN Semaphore project not configured/);
   assert.equal(called,false);
+});
+
+test('NEN API permission failure returns only typed HTTP status through private queue',async()=>{
+  const values=new Map();
+  const kv={get:async key=>values.get(key)??null,put:async(key,val)=>{values.set(key,val);},
+    delete:async key=>values.delete(key)};
+  const c=command('inspect',{pipelineId:pipeline});
+  const result=await processRequest({QUEUE:kv,...env},id,JSON.stringify(c),now,
+    async()=>new Response('sensitive response not permitted',{status:403}));
+  assert.equal(result.status,'error');
+  assert.equal(result.error,'NEN Semaphore API HTTP 403');
+  assert.ok(!JSON.stringify(result).includes('sensitive response'));
+  assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
 });
