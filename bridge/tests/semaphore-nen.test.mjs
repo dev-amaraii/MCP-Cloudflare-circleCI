@@ -271,3 +271,25 @@ test('NEN preview pin is the reviewed protected-auth PR40 revision',()=>{
   assert.equal(NEN_PREVIEW.commitSha,'ea04f646900b786f1f0a6be733dc90bcf127ff7f');
   assert.equal(NEN_PREVIEW.pipelineFile,'.semaphore/semaphore.yml');
 });
+
+test('NEN preview preflight emits only safe missing/denied categories, never raw secrets', async()=>{
+  for (const [diagnostic, expected] of [
+    ['NEN_PREVIEW_AUTH_REQUIRED','preview_credential_missing'],
+    ['NEN_PREVIEW_AUTH_DENIED','preview_authentication_denied'],
+  ]) {
+    const events=[
+      {event:'cmd_output',output:diagnostic+' credential='+env.SEMAPHORE_TOKEN},
+      {event:'cmd_finished',directive:'other',exit_code:2},
+    ];
+    const read=async url=>{
+      if(url===base+'/pipelines/'+pipeline)return response({pipeline:{ppl_id:pipeline,project_id,wf_id:workflow}});
+      if(url===base+'/pipelines/'+pipeline+'?detailed=true')return response({pipeline:{project_id,wf_id:workflow},blocks:[{jobs:[{job_id:job}]}]});
+      if(url===base+'/logs/'+job)return response({events});
+      throw Error('Unexpected NEN mock resource');
+    };
+    const out=await executeSemaphoreNen(env,command('nen_job_diagnostics',{pipelineId:pipeline,jobId:job}),read);
+    assert.deepEqual(out.errorKinds,[expected]);
+    assert.ok(!JSON.stringify(out).includes(env.SEMAPHORE_TOKEN));
+    assert.equal(out.failedCommands[0].exitCode,2);
+  }
+});
