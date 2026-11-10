@@ -31,22 +31,29 @@ async function apiGet(env, path, requestFn) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Malformed Semaphore response');
   return value;
 }
-function ownedPipeline(p, requestedId, targetProject) {
-  return p && p.project_id === targetProject &&
-    (!p.ppl_id || p.ppl_id === requestedId) && UUID.test(p.wf_id ?? '');
-}
 async function getOwned(env, pipelineId, requestFn) {
   checkId(pipelineId);
   const target = projectId(env);
   const basic = await apiGet(env, '/pipelines/' + pipelineId, requestFn);
-  if (!ownedPipeline(basic.pipeline, pipelineId, target)) throw Error('NEN Semaphore pipeline ownership mismatch');
+  const first = basic.pipeline;
+  // Return only fixed error categories, never upstream identifiers or payloads.
+  // In particular, a project mismatch must stop before the detailed pipeline
+  // or any job/artifact access, preserving tenant isolation.
+  if (!first || first.project_id !== target)
+    throw Error('NEN Semaphore project identity mismatch');
+  if (first.ppl_id && first.ppl_id !== pipelineId)
+    throw Error('NEN Semaphore pipeline identity mismatch');
+  if (!UUID.test(first.wf_id ?? ''))
+    throw Error('NEN Semaphore workflow identity missing');
   const details = await apiGet(env, '/pipelines/' + pipelineId + '?detailed=true', requestFn);
   const p = details.pipeline;
   if (!p || (p.project_id && p.project_id !== target) ||
       (p.ppl_id && p.ppl_id !== pipelineId) ||
-      (p.wf_id && p.wf_id !== basic.pipeline.wf_id) ||
-      !Array.isArray(details.blocks)) throw Error('NEN Semaphore pipeline ownership mismatch');
-  return {pipeline:basic.pipeline, blocks:details.blocks, workflowId:basic.pipeline.wf_id};
+      (p.wf_id && p.wf_id !== first.wf_id))
+    throw Error('NEN Semaphore detailed pipeline identity mismatch');
+  if (!Array.isArray(details.blocks))
+    throw Error('NEN Semaphore detailed job blocks missing');
+  return {pipeline:first, blocks:details.blocks, workflowId:first.wf_id};
 }
 function jobsFrom(blocks) {
   return blocks.slice(0,16).flatMap(b=>(Array.isArray(b.jobs)?b.jobs:[]).slice(0,25));
