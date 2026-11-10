@@ -283,8 +283,8 @@ test('NEN preview preflight emits only safe missing/denied categories, never raw
       {event:'cmd_finished',directive:'other',exit_code:2},
     ];
     const read=async url=>{
-      if(url===base+'/pipelines/'+pipeline)return response({pipeline:{ppl_id:pipeline,project_id,wf_id:workflow}});
-      if(url===base+'/pipelines/'+pipeline+'?detailed=true')return response({pipeline:{project_id,wf_id:workflow},blocks:[{jobs:[{job_id:job}]}]});
+      if(url===base+'/pipelines/'+pipeline)return response({pipeline:{ppl_id:pipeline,project_id:projectId,wf_id:workflow}});
+      if(url===base+'/pipelines/'+pipeline+'?detailed=true')return response({pipeline:{project_id:projectId,wf_id:workflow},blocks:[{jobs:[{job_id:job}]}]});
       if(url===base+'/logs/'+job)return response({events});
       throw Error('Unexpected NEN mock resource');
     };
