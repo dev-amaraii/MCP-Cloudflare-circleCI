@@ -8,6 +8,7 @@
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import { executeSemaphoreNen, NEN_SCREENSHOT } from './semaphore-nen.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -158,6 +159,10 @@ async function downloadChurchproReport(env, urlValue, requestFn = fetch) {
 }
 
 export const PROJECTS = Object.freeze({
+  'nen-website-cms': Object.freeze({
+    // Explicit Semaphore-only: no CircleCI project slug or release mode.
+    branches: [], modes: Object.freeze({}),
+  }),
   churchpro: Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu',
     // Resolve the existing GitHub App definition by identity; never guess an ID.
@@ -212,9 +217,36 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (!['circleci','semaphore','auto'].includes(provider)) throw new Error('CI provider not permitted');
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
-  if (provider === 'semaphore' &&
-      (command.project !== 'amaraii-os' || !['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action))) {
+  if (command.project === 'nen-website-cms' && provider !== 'semaphore') {
+    throw new Error('NEN website is Semaphore-only');
+  }
+  if (provider === 'semaphore' && !(
+      (command.project === 'amaraii-os' &&
+        ['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action)) ||
+      (command.project === 'nen-website-cms' &&
+        ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview'].includes(command.action)))) {
     throw new Error('Semaphore action not permitted');
+  }
+  if (command.project === 'nen-website-cms') {
+    // Separate project binding; no NEN triggers, releases or arbitrary artifact scopes.
+    const noExtras = command.branch === undefined && command.mode === undefined &&
+      command.commitSha === undefined && command.startNumber === undefined &&
+      command.jobNumber === undefined;
+    if (!noExtras) throw new Error('NEN Semaphore command has unexpected fields');
+    if (command.action === 'health' && command.pipelineId === undefined &&
+        command.jobId === undefined && command.artifactPath === undefined) return {command,project};
+    if (typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId))
+      throw new Error('Invalid NEN pipeline identity');
+    if (command.action === 'inspect' && command.jobId === undefined &&
+        command.artifactPath === undefined) return {command,project};
+    if (command.action === 'nen_job_diagnostics' && typeof command.jobId === 'string' &&
+        UUID.test(command.jobId) && command.artifactPath === undefined) return {command,project};
+    if (['nen_artifact_list','nen_artifact_report'].includes(command.action) &&
+        command.jobId === undefined && command.artifactPath === undefined) return {command,project};
+    if (command.action === 'nen_artifact_preview' && command.jobId === undefined &&
+        typeof command.artifactPath === 'string' && NEN_SCREENSHOT.test(command.artifactPath))
+      return {command,project};
+    throw new Error('NEN Semaphore command rejected');
   }
   if (command.action === 'health') {
     if (command.branch !== undefined || command.mode !== undefined ||
@@ -409,7 +441,8 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return {...result,provider:'circleci',requestedRevision:command.commitSha,
       revisionVerificationRequired:true,selectionReason:selection.reason};
   }
-  if (command.provider === 'semaphore') return executeSemaphore(env, command, requestFn);
+  if (command.provider === 'semaphore') return command.project === 'nen-website-cms'
+    ? executeSemaphoreNen(env,command,requestFn) : executeSemaphore(env,command,requestFn);
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',
