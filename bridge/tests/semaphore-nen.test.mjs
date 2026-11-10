@@ -257,3 +257,11 @@ test('NEN QA report accepts only production or pinned corporate PR40 preview ori
   await assert.rejects(executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),invalidRead),
     /Invalid NEN QA report/);
 });
+
+test('NEN preview submission requires approval and cannot switch CI providers',()=>{
+  const c=command('nen_trigger_preview',{branch:NEN_PREVIEW.branch,
+    commitSha:NEN_PREVIEW.commitSha,mode:'validation'});
+  assert.throws(()=>valid({...c,approved:false}),/Explicit approval required/);
+  assert.throws(()=>valid({...c,provider:'circleci'}),/NEN website is Semaphore-only/);
+  assert.throws(()=>valid({...c,provider:'auto'}),/Automatic CI route not permitted/);
+});
