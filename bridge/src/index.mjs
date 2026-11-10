@@ -792,6 +792,7 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
        'Semaphore fallback not enabled', 'Trigger has unexpected fields',
        'Semaphore project not configured', 'Semaphore token not configured',
        'Semaphore project mismatch', 'Invalid Semaphore response',
+       'NEN Semaphore project not configured', 'NEN Semaphore pipeline ownership mismatch', 'Malformed Semaphore response',
       'Branch not permitted', 'Pipeline mode not permitted', 'Invalid pipelineId',
       'Action not permitted', 'Health command has unexpected fields',
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
@@ -806,7 +807,7 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
     // tokens, request payloads, stack traces or URLs.
     const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ||
       /^Unsafe artifact URL: [a-z0-9.-]{1,253}$/.test(message) ||
-      /^Semaphore API HTTP [0-9]{3}$/.test(message) ? message
+      (/^Semaphore API HTTP [0-9]{3}$/.test(message) || /^NEN Semaphore API HTTP [0-9]{3}$/.test(message)) ? message
       : err instanceof SyntaxError ? 'Invalid JSON response or command'
       : /^CircleCI v3 HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof TypeError ? 'Network or API transport failure'
