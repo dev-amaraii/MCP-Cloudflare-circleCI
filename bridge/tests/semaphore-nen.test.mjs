@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {executeSemaphoreNen,NEN_SCREENSHOT} from '../src/semaphore-nen.mjs';
+import {executeSemaphoreNen,NEN_SCREENSHOT,NEN_PREVIEW} from '../src/semaphore-nen.mjs';
 import {validateCommand,executeCommand,processRequest} from '../src/index.mjs';
 const id='11111111-2222-4333-8444-555555555555';
 const pipeline='11111111-2222-4333-8444-555555555551';
@@ -68,7 +68,8 @@ test('NEN command registry is Semaphore-only, deny trigger, release, arbitrary f
 test('health uses distinct NEN binding without network access or secret disclosure',async()=>{
   const result=await executeCommand(env,command('health'),valid(command('health')).project,()=>{throw Error('No network')});
   assert.equal(result.project,'nen-website-cms');assert.equal(result.projectConfigured,true);
-  assert.equal(result.releasePermitted,false);assert.equal(result.triggerPermitted,false);
+  assert.equal(result.releasePermitted,false);assert.equal(result.triggerPermitted,true);
+  assert.equal(result.triggerScope,'single-reviewed-branch-and-exact-sha');
   assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
 });
 test('cross-project pipeline cannot access details or logs',async()=>{
@@ -192,4 +193,67 @@ test('typed NEN ownership category is private even if an upstream pipeline refer
   assert.equal(result.error,'NEN Semaphore project identity mismatch');
   assert.ok(!JSON.stringify(result).includes(otherProject));
   assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
+});
+
+test('NEN preview trigger cannot select a different branch, revision, mode or pipeline file',()=>{
+  const approved=command('nen_trigger_preview',{branch:NEN_PREVIEW.branch,
+    commitSha:NEN_PREVIEW.commitSha,mode:'validation'});
+  assert.doesNotThrow(()=>valid(approved));
+  for(const input of [
+    {branch:'main'}, {branch:'development'},
+    {commitSha:'a'.repeat(40)}, {commitSha:'invalid'},
+    {mode:'release'}, {mode:null}, {pipelineId:pipeline},
+    {artifactPath:'qa-intel/nen-production/report.json'}, {jobId:job},
+    {startNumber:1},{jobNumber:1},
+  ]) assert.throws(()=>valid({...approved,...input}),/NEN preview revision not permitted/);
+  for(const action of ['trigger','release','route']) assert.throws(()=>valid(
+    {...approved,action}),/Semaphore action not permitted/);
+});
+test('NEN preview trigger uses one fixed project, branch, file and exact SHA',async()=>{
+  const calls=[];
+  const read=async(url,opts)=>{
+    calls.push({url,opts});
+    return response({workflow_id:workflow,pipeline_id:pipeline});
+  };
+  const commandInput=command('nen_trigger_preview',{branch:NEN_PREVIEW.branch,
+    commitSha:NEN_PREVIEW.commitSha,mode:'validation'});
+  const result=await executeCommand(env,commandInput,valid(commandInput).project,read);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].url,base+'/plumber-workflows');
+  assert.equal(calls[0].opts.method,'POST');
+  assert.equal(calls[0].opts.redirect,'manual');
+  assert.deepEqual(JSON.parse(calls[0].opts.body),{
+    project_id:projectId,
+    reference:'refs/heads/'+NEN_PREVIEW.branch,
+    commit_sha:NEN_PREVIEW.commitSha,
+    pipeline_file:'.semaphore/semaphore.yml',
+  });
+  assert.equal(result.pipelineId,pipeline);
+  assert.equal(result.workflowId,workflow);
+  assert.equal(result.validationOnly,true);
+  assert.equal(result.releasePermitted,false);
+  assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
+});
+test('failed or malformed NEN workflow trigger returns only bounded categories',async()=>{
+  const c=command('nen_trigger_preview',{branch:NEN_PREVIEW.branch,
+    commitSha:NEN_PREVIEW.commitSha,mode:'validation'});
+  await assert.rejects(executeSemaphoreNen(env,c,async()=>new Response('secret',{status:403})),
+    /NEN Semaphore API HTTP 403/);
+  await assert.rejects(executeSemaphoreNen(env,c,async()=>response({workflow_id:'broken',pipeline_id:pipeline})),
+    /Invalid NEN preview workflow response/);
+  let called=false;
+  await assert.rejects(executeSemaphoreNen({SEMAPHORE_NEN_PROJECT_ID:projectId},c,async()=>{called=true;return response({})}),
+    /token not configured/);
+  assert.equal(called,false);
+});
+test('NEN QA report accepts only production or pinned corporate PR40 preview origin',async()=>{
+  const safe={...sampleReport,base:NEN_PREVIEW.base};
+  const bytes=new TextEncoder().encode(JSON.stringify(safe));
+  const {read}=mocked({bytes});
+  const r=await executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),read);
+  assert.equal(r.passed,0);
+  const invalid=new TextEncoder().encode(JSON.stringify({...safe,base:'https://attacker.vercel.app'}));
+  const {read:invalidRead}=mocked({bytes:invalid});
+  await assert.rejects(executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),invalidRead),
+    /Invalid NEN QA report/);
 });
