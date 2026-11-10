@@ -223,7 +223,11 @@ function safeLog(events) {
     if (/Permission denied|EACCES|EPERM/.test(output))errorKinds.add('permissions');
     if (/artifact.*(not found|failed|permission)/i.test(output))errorKinds.add('artifact_upload');
     if (/NEN_PREVIEW_AUTH_REQUIRED/.test(output))errorKinds.add('preview_credential_missing');
-    if (/NEN_PREVIEW_AUTH_DENIED/.test(output))errorKinds.add('preview_authentication_denied');
+    if (/NEN_PREVIEW_AUTH_DENIED/.test(output)) {
+      errorKinds.add('preview_authentication_denied');
+      const preflight = output.match(/NEN_PREVIEW_AUTH_DENIED:\s*(http_unavailable|vercel_login|unexpected_origin|navigation_or_heading_timeout)\b/);
+      if (preflight) errorKinds.add('preview_preflight_'+preflight[1]);
+    }
   }
   return {failedCommands:failedCommands.slice(0,12),errorKinds:[...errorKinds],outputEventsExamined:failureOutputs};
 }
