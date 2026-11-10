@@ -7,7 +7,7 @@ const pipeline='11111111-2222-4333-8444-555555555551';
 const workflow='11111111-2222-4333-8444-555555555552';
 const job='11111111-2222-4333-8444-555555555553';
 const projectId='11111111-2222-4333-8444-555555555554';
-const otherProject='11111111-2222-4333-8444-555555555555';
+const otherProject='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const env={SEMAPHORE_NEN_PROJECT_ID:projectId,SEMAPHORE_TOKEN:'private-test-token'};
 const now=Date.parse('2026-11-10T00:00:00Z');
 const command=(action,other={})=>({v:1,id,action,project:'nen-website-cms',provider:'semaphore',
@@ -173,7 +173,7 @@ test('detailed NEN pipeline mismatch fails before reading child jobs and artifac
     calls.push(url);
     if(url.endsWith('?detailed=true'))return response({pipeline:{
       project_id:otherProject,wf_id:workflow},blocks:[]});
-    return response({pipeline:{ppl_id:pipeline,project_id,wf_id:workflow}});
+    return response({pipeline:{ppl_id:pipeline,project_id:projectId,wf_id:workflow}});
   };
   await assert.rejects(executeSemaphoreNen(env,command('inspect',{pipelineId:pipeline}),read),
     /detailed pipeline identity mismatch/);
