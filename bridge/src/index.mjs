@@ -8,6 +8,7 @@
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_PREVIEW } from './semaphore-nen.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -158,6 +159,10 @@ async function downloadChurchproReport(env, urlValue, requestFn = fetch) {
 }
 
 export const PROJECTS = Object.freeze({
+  'nen-website-cms': Object.freeze({
+    // Explicit Semaphore-only: no CircleCI project slug or release mode.
+    branches: [], modes: Object.freeze({}),
+  }),
   churchpro: Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu',
     // Resolve the existing GitHub App definition by identity; never guess an ID.
@@ -212,9 +217,47 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (!['circleci','semaphore','auto'].includes(provider)) throw new Error('CI provider not permitted');
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
-  if (provider === 'semaphore' &&
-      (command.project !== 'amaraii-os' || !['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action))) {
+  if (command.project === 'nen-website-cms' && provider !== 'semaphore') {
+    throw new Error('NEN website is Semaphore-only');
+  }
+  if (provider === 'semaphore' && !(
+      (command.project === 'amaraii-os' &&
+        ['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action)) ||
+      (command.project === 'nen-website-cms' &&
+        ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview'].includes(command.action)))) {
     throw new Error('Semaphore action not permitted');
+  }
+  if (command.project === 'nen-website-cms') {
+    // NEN CI can only trigger the reviewed PR #40 SHA, never arbitrary
+    // branches, pipeline files, releases, or application deployments.
+    if (command.action === 'nen_trigger_preview') {
+      if (command.branch !== NEN_PREVIEW.branch || command.commitSha !== NEN_PREVIEW.commitSha ||
+          command.mode !== 'validation' || command.pipelineId !== undefined ||
+          command.jobId !== undefined || command.artifactPath !== undefined ||
+          command.startNumber !== undefined || command.jobNumber !== undefined) {
+        throw new Error('NEN preview revision not permitted');
+      }
+      return {command,project};
+    }
+    // Other NEN actions remain strictly read-only.
+    const noExtras = command.branch === undefined && command.mode === undefined &&
+      command.commitSha === undefined && command.startNumber === undefined &&
+      command.jobNumber === undefined;
+    if (!noExtras) throw new Error('NEN Semaphore command has unexpected fields');
+    if (command.action === 'health' && command.pipelineId === undefined &&
+        command.jobId === undefined && command.artifactPath === undefined) return {command,project};
+    if (typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId))
+      throw new Error('Invalid NEN pipeline identity');
+    if (command.action === 'inspect' && command.jobId === undefined &&
+        command.artifactPath === undefined) return {command,project};
+    if (command.action === 'nen_job_diagnostics' && typeof command.jobId === 'string' &&
+        UUID.test(command.jobId) && command.artifactPath === undefined) return {command,project};
+    if (['nen_artifact_list','nen_artifact_report'].includes(command.action) &&
+        command.jobId === undefined && command.artifactPath === undefined) return {command,project};
+    if (command.action === 'nen_artifact_preview' && command.jobId === undefined &&
+        typeof command.artifactPath === 'string' && NEN_SCREENSHOT.test(command.artifactPath))
+      return {command,project};
+    throw new Error('NEN Semaphore command rejected');
   }
   if (command.action === 'health') {
     if (command.branch !== undefined || command.mode !== undefined ||
@@ -409,7 +452,8 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return {...result,provider:'circleci',requestedRevision:command.commitSha,
       revisionVerificationRequired:true,selectionReason:selection.reason};
   }
-  if (command.provider === 'semaphore') return executeSemaphore(env, command, requestFn);
+  if (command.provider === 'semaphore') return command.project === 'nen-website-cms'
+    ? executeSemaphoreNen(env,command,requestFn) : executeSemaphore(env,command,requestFn);
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',
@@ -759,6 +803,10 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
        'Semaphore fallback not enabled', 'Trigger has unexpected fields',
        'Semaphore project not configured', 'Semaphore token not configured',
        'Semaphore project mismatch', 'Invalid Semaphore response',
+       'NEN Semaphore project not configured', 'NEN Semaphore pipeline ownership mismatch', 'Malformed Semaphore response',
+       'NEN Semaphore project identity mismatch', 'NEN Semaphore pipeline identity mismatch',
+       'NEN Semaphore workflow identity missing', 'NEN Semaphore detailed pipeline identity mismatch',
+       'NEN Semaphore detailed job blocks missing', 'NEN preview revision not permitted', 'Invalid NEN preview workflow response',
       'Branch not permitted', 'Pipeline mode not permitted', 'Invalid pipelineId',
       'Action not permitted', 'Health command has unexpected fields',
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
@@ -773,7 +821,7 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
     // tokens, request payloads, stack traces or URLs.
     const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ||
       /^Unsafe artifact URL: [a-z0-9.-]{1,253}$/.test(message) ||
-      /^Semaphore API HTTP [0-9]{3}$/.test(message) ? message
+      (/^Semaphore API HTTP [0-9]{3}$/.test(message) || /^NEN Semaphore API HTTP [0-9]{3}$/.test(message)) ? message
       : err instanceof SyntaxError ? 'Invalid JSON response or command'
       : /^CircleCI v3 HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof TypeError ? 'Network or API transport failure'

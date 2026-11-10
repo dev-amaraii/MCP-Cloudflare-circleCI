@@ -277,7 +277,7 @@ test('Semaphore QA artifact listing verifies owned pipeline and only returns saf
       {name:'private',path:'other/private.json',size:2,is_directory:false}
     ]});
   if(url.endsWith('?detailed=true'))return response({pipeline:{
-    wf_id:workflowId,project_id
+    wf_id:workflowId,project_id:projectId
    },blocks:[{name:'Protected survey',jobs:[{job_id:jobId,
      name:'Authenticated four-viewport survey; preserve findings without UI fixes'}]}]});
   return response({pipeline:{ppl_id:pipelineId,wf_id:workflowId,
