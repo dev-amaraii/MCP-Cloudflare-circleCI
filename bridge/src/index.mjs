@@ -8,7 +8,7 @@
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
-import { executeSemaphoreNen, NEN_SCREENSHOT } from './semaphore-nen.mjs';
+import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_PREVIEW } from './semaphore-nen.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -224,11 +224,22 @@ export function validateCommand(command, keyId, now = Date.now()) {
       (command.project === 'amaraii-os' &&
         ['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action)) ||
       (command.project === 'nen-website-cms' &&
-        ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview'].includes(command.action)))) {
+        ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview'].includes(command.action)))) {
     throw new Error('Semaphore action not permitted');
   }
   if (command.project === 'nen-website-cms') {
-    // Separate project binding; no NEN triggers, releases or arbitrary artifact scopes.
+    // NEN CI can only trigger the reviewed PR #40 SHA, never arbitrary
+    // branches, pipeline files, releases, or application deployments.
+    if (command.action === 'nen_trigger_preview') {
+      if (command.branch !== NEN_PREVIEW.branch || command.commitSha !== NEN_PREVIEW.commitSha ||
+          command.mode !== 'validation' || command.pipelineId !== undefined ||
+          command.jobId !== undefined || command.artifactPath !== undefined ||
+          command.startNumber !== undefined || command.jobNumber !== undefined) {
+        throw new Error('NEN preview revision not permitted');
+      }
+      return {command,project};
+    }
+    // Other NEN actions remain strictly read-only.
     const noExtras = command.branch === undefined && command.mode === undefined &&
       command.commitSha === undefined && command.startNumber === undefined &&
       command.jobNumber === undefined;
@@ -795,7 +806,7 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
        'NEN Semaphore project not configured', 'NEN Semaphore pipeline ownership mismatch', 'Malformed Semaphore response',
        'NEN Semaphore project identity mismatch', 'NEN Semaphore pipeline identity mismatch',
        'NEN Semaphore workflow identity missing', 'NEN Semaphore detailed pipeline identity mismatch',
-       'NEN Semaphore detailed job blocks missing',
+       'NEN Semaphore detailed job blocks missing', 'NEN preview revision not permitted', 'Invalid NEN preview workflow response',
       'Branch not permitted', 'Pipeline mode not permitted', 'Invalid pipelineId',
       'Action not permitted', 'Health command has unexpected fields',
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
