@@ -6,7 +6,7 @@
 const API = 'https://amaraii.semaphoreci.com/api/v1alpha';
 export const NEN_PREVIEW = Object.freeze({
   branch:'fix/nen-mobile-footer-overflow-20261110',
-  commitSha:'ea04f646900b786f1f0a6be733dc90bcf127ff7f',
+  commitSha:'7413ef8417f0b3c8f488ae9462633d837cae45b7',
   base:'https://nen-website-cms-staging-git-fix-nen-mobile-fe8706-amaraii-team.vercel.app',
   pipelineFile:'.semaphore/semaphore.yml',
 });
