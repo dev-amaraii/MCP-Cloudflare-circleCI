@@ -1,0 +1,122 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {executeSemaphoreNen,NEN_SCREENSHOT} from '../src/semaphore-nen.mjs';
+import {validateCommand,executeCommand} from '../src/index.mjs';
+const id='11111111-2222-4333-8444-555555555555';
+const pipeline='11111111-2222-4333-8444-555555555551';
+const workflow='11111111-2222-4333-8444-555555555552';
+const job='11111111-2222-4333-8444-555555555553';
+const projectId='11111111-2222-4333-8444-555555555554';
+const otherProject='11111111-2222-4333-8444-555555555555';
+const env={SEMAPHORE_NEN_PROJECT_ID:projectId,SEMAPHORE_TOKEN:'private-test-token'};
+const now=Date.parse('2026-11-10T00:00:00Z');
+const command=(action,other={})=>({v:1,id,action,project:'nen-website-cms',provider:'semaphore',
+  requestedAt:new Date(now).toISOString(),approved:true,...other});
+const valid=x=>validateCommand(x,id,now);
+const base='https://amaraii.semaphoreci.com/api/v1alpha';
+const response=payload=>Response.json(payload);
+const sampleReport={base:'https://www.neninternational.com',count:1,failures:1,
+ results:[{id:'home-320-light',viewport:{width:320},horizontalOverflow:19,
+   failures:['horizontal overflow 19px'],overflowCandidates:[{tag:'div',excessRight:19,width:340,
+   parentOverflow:'visible',className:'untrusted-private-css'}]}]};
+const png=new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,0]);
+function mocked(opts={}) {
+  const calls=[];
+  const read=async(url,init)=>{
+    calls.push({url,method:init?.method,headers:init?.headers});
+    if(url===base+'/pipelines/'+pipeline) return response({pipeline:{
+      ppl_id:pipeline,project_id:opts.project||projectId,wf_id:workflow,
+      state:'done',result:'failed',commit_sha:'a'.repeat(40),branch_name:'set-up-semaphore'}});
+    if(url===base+'/pipelines/'+pipeline+'?detailed=true')return response({pipeline:{
+      project_id:projectId,wf_id:workflow},blocks:[{name:'NEN test',jobs:[{
+      job_id:job,name:'Browser',result:'FAILED'}]}]});
+    if(url===base+'/logs/'+job) return response({events:[
+      {event:'cmd_output',output:'OVERFLOW_DIAGNOSTICS home-320-light secret='+env.SEMAPHORE_TOKEN},
+      {event:'cmd_finished',directive:'node scripts/qa/nen-production.mjs',exit_code:1}]});
+    if(url.startsWith(base+'/artifacts?'))return response({artifacts:[
+      {name:'report.json',path:'qa-intel/nen-production/report.json',size:200},
+      {name:'home-320-light.png',path:'qa-intel/nen-production/home-320-light.png',size:12},
+      {name:'secret.env',path:'qa-intel/nen-production/secret.env',size:5}]});
+    if(url.startsWith(base+'/artifacts/signed_url?')){
+      const path=new URL(url).searchParams.get('path');
+      return response({items:[{path,url:opts.host||'https://storage.googleapis.com/approved/test'}]});
+    }
+    if(url.startsWith('https://storage.googleapis.com/')){
+      const data=opts.bytes||new TextEncoder().encode(JSON.stringify(sampleReport));
+      return new Response(data,{status:200,headers:{'content-type':'application/octet-stream'}});
+    }
+    throw Error('Unexpected mock URL');
+  };
+  return {read,calls};
+}
+test('NEN command registry is Semaphore-only, deny trigger, release, arbitrary fields and cross-project access',()=>{
+  assert.equal(valid(command('health')).project.modes.validation,undefined);
+  for(const action of ['route','trigger','release','job','recent','artifact_preview','artifact_report','audit','probe'])
+    assert.throws(()=>valid(command(action,{pipelineId:pipeline})));
+  assert.throws(()=>valid(command('health',{provider:'circleci'})));
+  assert.throws(()=>valid(command('health',{provider:'auto'})));
+  assert.throws(()=>valid(command('health',{branch:'main'})));
+  assert.throws(()=>valid(command('inspect',{pipelineId:pipeline,branch:'main'})));
+  assert.throws(()=>valid(command('nen_artifact_preview',{pipelineId:pipeline,artifactPath:'../secret.env'})));
+  assert.throws(()=>valid(command('nen_job_diagnostics',{pipelineId:pipeline,jobId:'invalid'})));
+  assert.doesNotThrow(()=>valid(command('inspect',{pipelineId:pipeline})));
+  assert.doesNotThrow(()=>valid(command('nen_artifact_list',{pipelineId:pipeline})));
+  assert.doesNotThrow(()=>valid(command('nen_artifact_report',{pipelineId:pipeline})));
+  assert.doesNotThrow(()=>valid(command('nen_job_diagnostics',{pipelineId:pipeline,jobId:job})));
+  assert.doesNotThrow(()=>valid(command('nen_artifact_preview',{pipelineId:pipeline,artifactPath:'home-320-light.png'})));
+});
+test('health uses distinct NEN binding without network access or secret disclosure',async()=>{
+  const result=await executeCommand(env,command('health'),valid(command('health')).project,()=>{throw Error('No network')});
+  assert.equal(result.project,'nen-website-cms');assert.equal(result.projectConfigured,true);
+  assert.equal(result.releasePermitted,false);assert.equal(result.triggerPermitted,false);
+  assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
+});
+test('cross-project pipeline cannot access details or logs',async()=>{
+  const {read,calls}=mocked({project:otherProject});
+  await assert.rejects(executeSemaphoreNen(env,command('inspect',{pipelineId:pipeline}),read),/ownership mismatch/);
+  assert.equal(calls.length,1);
+});
+test('owned NEN pipeline reports bounded jobs, exact revision and no secrets',async()=>{
+  const {read}=mocked();const result=await executeSemaphoreNen(env,command('inspect',{pipelineId:pipeline}),read);
+  assert.equal(result.workflowId,workflow);assert.equal(result.revision,'a'.repeat(40));
+  assert.equal(result.blocks[0].jobs[0].id,job);
+  assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
+});
+test('NEN job logs return only allowlisted diagnostics, not raw output',async()=>{
+  const {read}=mocked();
+  const r=await executeSemaphoreNen(env,command('nen_job_diagnostics',{pipelineId:pipeline,jobId:job}),read);
+  assert.deepEqual(r.errorKinds,['horizontal_overflow']);
+  assert.equal(r.failedCommands[0].exitCode,1);
+  assert.ok(!JSON.stringify(r).includes(env.SEMAPHORE_TOKEN));
+});
+test('an unowned job is denied before log API request',async()=>{
+  const {read,calls}=mocked();await assert.rejects(
+    executeSemaphoreNen(env,command('nen_job_diagnostics',{pipelineId:pipeline,jobId:otherProject}),read),
+    /job ownership mismatch/);
+  assert.equal(calls.length,2);
+});
+test('artifact listing hides unapproved files and signed URLs',async()=>{
+  const {read}=mocked();const r=await executeSemaphoreNen(env,command('nen_artifact_list',{pipelineId:pipeline}),read);
+  assert.deepEqual(r.files.map(f=>f.name),['report.json','home-320-light.png']);
+  assert.ok(!JSON.stringify(r).includes('secret.env'));
+});
+test('report returns sanitized overflow evidence, not raw page content',async()=>{
+  const {read}=mocked();const r=await executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),read);
+  assert.equal(r.failures,1);assert.equal(r.failuresDetail[0].overflowPx,19);
+  assert.ok(!JSON.stringify(r).includes('untrusted-private-css'));
+});
+test('untrusted artifact signing host is rejected before any outbound request',async()=>{
+  const {read,calls}=mocked({host:'https://evil.example/exfil'});
+  await assert.rejects(executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),read),/storage host/);
+  assert.equal(calls.length,3);
+});
+test('only named synthetic PNGs can be read',async()=>{
+  assert.equal(NEN_SCREENSHOT.test('../.env'),false);
+  const {read}=mocked({bytes:png});
+  const r=await executeSemaphoreNen(env,command('nen_artifact_preview',{pipelineId:pipeline,artifactPath:'home-320-light.png'}),read);
+  assert.equal(r.mediaType,'image/png');assert.equal(r.bytes,png.length);
+});
+test('malformed QA JSON rejected',async()=>{
+  const {read}=mocked({bytes:new TextEncoder().encode(JSON.stringify({...sampleReport,base:'https://evil.example'}))});
+  await assert.rejects(executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),read),/Invalid NEN QA report/);
+});
