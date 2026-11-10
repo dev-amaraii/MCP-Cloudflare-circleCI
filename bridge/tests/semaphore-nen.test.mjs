@@ -73,7 +73,7 @@ test('health uses distinct NEN binding without network access or secret disclosu
 });
 test('cross-project pipeline cannot access details or logs',async()=>{
   const {read,calls}=mocked({project:otherProject});
-  await assert.rejects(executeSemaphoreNen(env,command('inspect',{pipelineId:pipeline}),read),/ownership mismatch/);
+  await assert.rejects(executeSemaphoreNen(env,command('inspect',{pipelineId:pipeline}),read),/project identity mismatch/);
   assert.equal(calls.length,1);
 });
 test('owned NEN pipeline reports bounded jobs, exact revision and no secrets',async()=>{
@@ -147,4 +147,35 @@ test('NEN artifact summary never permits a caller-selected report path',()=>{
     pipelineId:pipeline,artifactPath:'qa-intel/amaraii-os/report.json'})));
   assert.throws(()=>valid(command('nen_artifact_list',{
     pipelineId:pipeline,artifactPath:'qa-intel/nen-production/../private'})));
+});
+
+test('typed NEN ownership failures reveal neither foreign IDs nor signed data',async()=>{
+  const cases=[
+    ['project identity mismatch',{project:otherProject}],
+    ['pipeline identity mismatch',{ppl:'11111111-2222-4333-8444-555555555559'}],
+    ['workflow identity missing',{wf:'not-a-uuid'}],
+  ];
+  for(const [kind,fixture] of cases){
+    const calls=[];
+    const read=async(url)=>{
+      calls.push(url);
+      return response({pipeline:{ppl_id:fixture.ppl??pipeline,
+        project_id:fixture.project??projectId,wf_id:fixture.wf??workflow}});
+    };
+    await assert.rejects(executeSemaphoreNen(env,command('inspect',{pipelineId:pipeline}),read),
+      new RegExp('NEN Semaphore '+kind));
+    assert.equal(calls.length,1,'not allowed to query child resources after '+kind);
+  }
+});
+test('detailed NEN pipeline mismatch fails before reading child jobs and artifacts',async()=>{
+  const calls=[];
+  const read=async(url)=>{
+    calls.push(url);
+    if(url.endsWith('?detailed=true'))return response({pipeline:{
+      project_id:otherProject,wf_id:workflow},blocks:[]});
+    return response({pipeline:{ppl_id:pipeline,project_id,wf_id:workflow}});
+  };
+  await assert.rejects(executeSemaphoreNen(env,command('inspect',{pipelineId:pipeline}),read),
+    /detailed pipeline identity mismatch/);
+  assert.equal(calls.length,2);
 });
