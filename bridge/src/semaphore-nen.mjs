@@ -1,8 +1,15 @@
-/** Read-only Semaphore diagnostics for the NEN corporate website.
- * No caller-selected project, origin, token, or artifact scope. Do not re-use
- * AmaraiiOS's SEMAPHORE_PROJECT_ID; NEN has its own Worker binding.
+/** Isolated NEN Semaphore diagnostics plus one reviewed validation-only workflow.
+ * No caller-selected project, origin, token, pipeline file, or release mode.
+ * The approved preview trigger is pinned to one branch and exact SHA.
+ * AmaraiiOS retains its independent SEMAPHORE_PROJECT_ID binding.
  */
 const API = 'https://amaraii.semaphoreci.com/api/v1alpha';
+export const NEN_PREVIEW = Object.freeze({
+  branch:'fix/nen-mobile-footer-overflow-20261110',
+  commitSha:'b9818b0e81dcf1058e4916883520de1ff15923d3',
+  base:'https://nen-website-cms-staging-git-fix-nen-mobile-fe8706-amaraii-team.vercel.app',
+  pipelineFile:'.semaphore/semaphore.yml',
+});
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{40}$/;
 const ARTIFACT_DIR = 'qa-intel/nen-production';
@@ -30,6 +37,31 @@ async function apiGet(env, path, requestFn) {
   const value = await res.json();
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Malformed Semaphore response');
   return value;
+}
+async function triggerPreview(env, command, requestFn) {
+  if (command.branch !== NEN_PREVIEW.branch || command.commitSha !== NEN_PREVIEW.commitSha)
+    throw Error('NEN preview revision not permitted');
+  if (!tokenReady(env)) throw Error('Semaphore token not configured');
+  const response = await requestFn(API+'/plumber-workflows',{
+    method:'POST',redirect:'manual',
+    headers:{Authorization:'Token '+env.SEMAPHORE_TOKEN,
+      Accept:'application/json', 'Content-Type':'application/json',
+      'User-Agent':'SemaphoreCI v2.0 Client'},
+    body:JSON.stringify({
+      project_id:projectId(env),
+      reference:'refs/heads/'+NEN_PREVIEW.branch,
+      commit_sha:NEN_PREVIEW.commitSha,
+      pipeline_file:NEN_PREVIEW.pipelineFile,
+    }),
+  });
+  if (!response.ok) throw Error('NEN Semaphore API HTTP '+response.status);
+  const data = await response.json();
+  if (!UUID.test(data?.workflow_id??'') || !UUID.test(data?.pipeline_id??''))
+    throw Error('Invalid NEN preview workflow response');
+  return {provider:'semaphore',project:'nen-website-cms',
+    branch:NEN_PREVIEW.branch,revision:NEN_PREVIEW.commitSha,
+    pipelineId:data.pipeline_id,workflowId:data.workflow_id,
+    validationOnly:true,releasePermitted:false};
 }
 async function getOwned(env, pipelineId, requestFn) {
   checkId(pipelineId);
@@ -118,7 +150,9 @@ function safeReport(data) {
   if (!data || typeof data !== 'object' || !Array.isArray(data.results) ||
       data.count !== data.results.length || data.count < 1 || data.count > 100 ||
       !Number.isInteger(data.failures) || data.failures < 0 || data.failures > data.count ||
-      typeof data.base !== 'string' || !/^https:\/\/(?:www\.)?neninternational\.com\/?$/.test(data.base)) {
+      typeof data.base !== 'string' ||
+      !(/^https:\/\/(?:www\.)?neninternational\.com\/?$/.test(data.base) ||
+        data.base === NEN_PREVIEW.base)) {
     throw Error('Invalid NEN QA report');
   }
   const failures=[];
@@ -195,8 +229,9 @@ function safeLog(events) {
 export async function executeSemaphoreNen(env, command, requestFn=fetch) {
   if (command.action === 'health') return {provider:'semaphore',project:'nen-website-cms',
     projectConfigured:UUID.test(env.SEMAPHORE_NEN_PROJECT_ID ?? ''), tokenConfigured:tokenReady(env),
-    allowedActions:['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview'],
-    releasePermitted:false, triggerPermitted:false};
+    allowedActions:['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview'],
+    releasePermitted:false,triggerPermitted:true,triggerScope:'single-reviewed-branch-and-exact-sha'};
+  if (command.action === 'nen_trigger_preview') return triggerPreview(env,command,requestFn);
   const {pipeline,blocks,workflowId}=await getOwned(env,command.pipelineId,requestFn);
   if (command.action === 'inspect') return {provider:'semaphore',project:'nen-website-cms',
     pipelineId:command.pipelineId,workflowId,
