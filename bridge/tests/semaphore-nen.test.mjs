@@ -268,7 +268,7 @@ test('NEN preview submission requires approval and cannot switch CI providers',(
 
 test('NEN preview pin is the reviewed protected-auth PR40 revision',()=>{
   assert.equal(NEN_PREVIEW.branch,'fix/nen-mobile-footer-overflow-20261110');
-  assert.equal(NEN_PREVIEW.commitSha,'7413ef8417f0b3c8f488ae9462633d837cae45b7');
+  assert.equal(NEN_PREVIEW.commitSha,'6b1b6d57e43f55350b0e67ee690e0c2a852bcb54');
   assert.equal(NEN_PREVIEW.pipelineFile,'.semaphore/semaphore.yml');
 });
 
@@ -296,7 +296,7 @@ test('NEN preview preflight emits only safe missing/denied categories, never raw
 });
 
 test('NEN preview detail exposes only fixed preflight categories',async()=>{
-  const reasons=['http_unavailable','vercel_login','unexpected_origin','navigation_or_heading_timeout'];
+  const reasons=['http_unavailable','vercel_login','unexpected_origin','navigation_or_heading_timeout','navigation_error'];
   for(const reason of reasons) {
     const events=[{event:'cmd_output',output:'NEN_PREVIEW_AUTH_DENIED: '+reason+' secret='+env.SEMAPHORE_TOKEN},
       {event:'cmd_finished',directive:'other',exit_code:2}];
