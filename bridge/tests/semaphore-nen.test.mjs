@@ -265,3 +265,9 @@ test('NEN preview submission requires approval and cannot switch CI providers',(
   assert.throws(()=>valid({...c,provider:'circleci'}),/NEN website is Semaphore-only/);
   assert.throws(()=>valid({...c,provider:'auto'}),/Automatic CI route not permitted/);
 });
+
+test('NEN preview pin is the reviewed protected-auth PR40 revision',()=>{
+  assert.equal(NEN_PREVIEW.branch,'fix/nen-mobile-footer-overflow-20261110');
+  assert.equal(NEN_PREVIEW.commitSha,'ea04f646900b786f1f0a6be733dc90bcf127ff7f');
+  assert.equal(NEN_PREVIEW.pipelineFile,'.semaphore/semaphore.yml');
+});
