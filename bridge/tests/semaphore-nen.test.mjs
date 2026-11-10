@@ -120,3 +120,11 @@ test('malformed QA JSON rejected',async()=>{
   const {read}=mocked({bytes:new TextEncoder().encode(JSON.stringify({...sampleReport,base:'https://evil.example'}))});
   await assert.rejects(executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),read),/Invalid NEN QA report/);
 });
+
+test('missing NEN project binding fails before any Semaphore API request',async()=>{
+  let called=false;
+  await assert.rejects(executeSemaphoreNen({SEMAPHORE_TOKEN:'private-test-token'},
+    command('inspect',{pipelineId:pipeline}),()=>{called=true;throw Error('API must not be called');}),
+    /NEN Semaphore project not configured/);
+  assert.equal(called,false);
+});
