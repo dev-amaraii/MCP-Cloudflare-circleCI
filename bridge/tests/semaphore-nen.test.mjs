@@ -141,3 +141,10 @@ test('NEN API permission failure returns only typed HTTP status through private 
   assert.ok(!JSON.stringify(result).includes('sensitive response'));
   assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
 });
+
+test('NEN artifact summary never permits a caller-selected report path',()=>{
+  assert.throws(()=>valid(command('nen_artifact_report',{
+    pipelineId:pipeline,artifactPath:'qa-intel/amaraii-os/report.json'})));
+  assert.throws(()=>valid(command('nen_artifact_list',{
+    pipelineId:pipeline,artifactPath:'qa-intel/nen-production/../private'})));
+});
