@@ -88,8 +88,8 @@ function failureSummary(payload) {
     .replace(/\b(?:sk-|ghp_|github_pat_|semaphore_)[A-Za-z0-9_-]+/gi, '[redacted]')
     .replace(/\b[A-Za-z0-9+/_=-]{32,}\b/g, '[redacted]')
     .slice(0, 180);
-  const lines = lastFailure.output.split(/\r?\n/)
-    .filter(line => /(?:error:|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed)/i.test(line))
+  const lines = lastFailure.output.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
+    .filter(line => /(?:\berror\b|\bwarning\b|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed|✖)/i.test(line))
     .filter(line => !/(?:API[_-]?KEY|SECRET|PASSWORD|TOKEN|AUTHORIZATION|PRIVATE[_-]?KEY)\s*[:=]/i.test(line))
     .slice(-10).map(redact);
   return {
