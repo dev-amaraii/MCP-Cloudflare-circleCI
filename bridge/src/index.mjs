@@ -225,7 +225,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
       (command.project === 'amaraii-os' &&
         ['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action)) ||
       (command.project === 'churchpro' &&
-        ['health','trigger','inspect','churchpro_report','churchpro_artifact_probe'].includes(command.action)) ||
+        ['health','trigger','inspect','churchpro_report','churchpro_artifact_probe','churchpro_png'].includes(command.action)) ||
       (command.project === 'nen-website-cms' &&
         ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview'].includes(command.action)))) {
     throw new Error('Semaphore action not permitted');
@@ -379,6 +379,17 @@ export function validateCommand(command, keyId, now = Date.now()) {
       throw new Error('Semaphore artifact listing not permitted');
     }
     return {command,project};
+  }
+  if (command.action === 'churchpro_png') {
+    if (command.project !== 'churchpro' || provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        typeof command.artifactPath !== 'string' ||
+        !/^visual-review\/(?:people-390|navigation-390|cells-390|church-1280|people-1280|people-320|church-768|cells-1440|people-dark-1280|person-detail-390|cell-roster-390|staff-1280|staff-removed-1280)\.png$/u.test(command.artifactPath) ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined) throw Error('ChurchPro PNG access not permitted');
+    return {command, project};
   }
   if (command.action === 'churchpro_artifact_probe') {
     if (command.project !== 'churchpro' || provider !== 'semaphore' ||
