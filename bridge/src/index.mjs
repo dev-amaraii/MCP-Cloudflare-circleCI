@@ -8,6 +8,7 @@
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-churchpro.mjs';
 import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_PREVIEW } from './semaphore-nen.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
@@ -223,6 +224,8 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (provider === 'semaphore' && !(
       (command.project === 'amaraii-os' &&
         ['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action)) ||
+      (command.project === 'churchpro' &&
+        ['health','trigger','inspect','churchpro_report','churchpro_artifact_probe','churchpro_png'].includes(command.action)) ||
       (command.project === 'nen-website-cms' &&
         ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview'].includes(command.action)))) {
     throw new Error('Semaphore action not permitted');
@@ -274,7 +277,9 @@ export function validateCommand(command, keyId, now = Date.now()) {
       if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha))
         throw new Error('Invalid automatic CI revision');
     }
-    const branches = provider === 'semaphore' ? SEMAPHORE_BRANCHES : project.branches;
+    const branches = provider === 'semaphore'
+      ? (command.project === 'churchpro' ? [CHURCHPRO_SEMAPHORE.branch] : SEMAPHORE_BRANCHES)
+      : project.branches;
     if (typeof command.branch !== 'string' || !branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (provider === 'semaphore') {
       if (command.mode !== 'validation') throw new Error('Pipeline mode not permitted');
@@ -375,6 +380,39 @@ export function validateCommand(command, keyId, now = Date.now()) {
     }
     return {command,project};
   }
+  if (command.action === 'churchpro_png') {
+    if (command.project !== 'churchpro' || provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        typeof command.artifactPath !== 'string' ||
+        !/^visual-review\/(?:people-390|navigation-390|cells-390|church-1280|people-1280|people-320|church-768|cells-1440|people-dark-1280|person-detail-390|cell-roster-390|staff-1280|staff-removed-1280)\.png$/u.test(command.artifactPath) ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined) throw Error('ChurchPro PNG access not permitted');
+    return {command, project};
+  }
+  if (command.action === 'churchpro_artifact_probe') {
+    if (command.project !== 'churchpro' || provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        command.artifactPath !== undefined || command.branch !== undefined ||
+        command.mode !== undefined || command.commitSha !== undefined ||
+        command.startNumber !== undefined || command.jobNumber !== undefined) {
+      throw Error('ChurchPro artifact probe not permitted');
+    }
+    return {command, project};
+  }
+  if (command.action === 'churchpro_report') {
+    if (command.project !== 'churchpro' || provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        !['qa-intel/churchpro/agent-handoff.json',
+          'qa-intel/churchpro/gather-browser-handoff.json'].includes(command.artifactPath) ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined) throw Error('ChurchPro report access not permitted');
+    return { command, project };
+  }
   if (command.action === 'inspect') {
     if (typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) throw new Error('Invalid pipelineId');
     if (command.branch !== undefined || command.mode !== undefined ||
@@ -452,8 +490,11 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return {...result,provider:'circleci',requestedRevision:command.commitSha,
       revisionVerificationRequired:true,selectionReason:selection.reason};
   }
-  if (command.provider === 'semaphore') return command.project === 'nen-website-cms'
-    ? executeSemaphoreNen(env,command,requestFn) : executeSemaphore(env,command,requestFn);
+  if (command.provider === 'semaphore') {
+    if (command.project === 'nen-website-cms') return executeSemaphoreNen(env,command,requestFn);
+    if (command.project === 'churchpro') return executeSemaphoreChurchPro(env,command,requestFn);
+    return executeSemaphore(env,command,requestFn);
+  }
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',
@@ -816,12 +857,24 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
       'Invalid release revision', 'Release command has unexpected fields', 'Invalid job number', 'Job inspection has unexpected fields', 'Job project mismatch',
       'Invalid job identity', 'Job steps have unexpected fields', 'Job does not belong to approved pipeline', 'Job identity mismatch',
       'Semaphore artifact listing not permitted', 'Semaphore artifact preview not permitted', 'Semaphore QA artifact access not permitted', 'Artifact preview not permitted', 'Artifact not found', 'Artifact too large', 'Artifact format not supported', 'Artifact download failed', 'Unsafe artifact URL',
+      'ChurchPro report access not permitted', 'ChurchPro pipeline identity mismatch',
+      'ChurchPro source identity missing', 'ChurchPro workflow identity mismatch',
+      'ChurchPro QA job ownership mismatch', 'QA artifact unavailable',
+      'Invalid artifact location', 'Invalid sanitized QA report', 'Report too large',
+      'QA report source mismatch', 'Browser report source mismatch',
+      'ChurchPro artifact probe not permitted', 'ChurchPro artifact probe ownership mismatch',
+      'ChurchPro PNG access not permitted', 'ChurchPro PNG ownership mismatch',
+      'ChurchPro PNG job ownership mismatch', 'ChurchPro PNG artifact unavailable',
+      'ChurchPro PNG signature unavailable', 'ChurchPro PNG provenance mismatch',
+      'ChurchPro PNG download failed', 'ChurchPro PNG too large',
+      'ChurchPro PNG format mismatch', 'ChurchPro PNG dimensions invalid',
+      'ChurchPro PNG redirect limit',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
     const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ||
       /^Unsafe artifact URL: [a-z0-9.-]{1,253}$/.test(message) ||
-      (/^Semaphore API HTTP [0-9]{3}$/.test(message) || /^NEN Semaphore API HTTP [0-9]{3}$/.test(message)) ? message
+      (/^Semaphore API HTTP [0-9]{3}$/.test(message) || /^NEN Semaphore API HTTP [0-9]{3}$/.test(message) || /^ChurchPro Semaphore API HTTP [0-9]{3}$/.test(message)) ? message
       : err instanceof SyntaxError ? 'Invalid JSON response or command'
       : /^CircleCI v3 HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof TypeError ? 'Network or API transport failure'
