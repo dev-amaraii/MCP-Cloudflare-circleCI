@@ -179,12 +179,24 @@ function safeReport(data) {
         if (value.startsWith('execution:')) return 'browser_execution';
         if (value === 'NEN brand CSS tokens missing') return 'brand_tokens_missing';
         if (value.startsWith('hero background lost contrast')) return 'hero_contrast';
+        if (/^brand panel \\d{1,2} (?:h1|h2|p) foreground\\/background contrast (?:unknown|\\d+(?:\\.\\d+)?):1 below (?:3|4\\.5):1$/.test(value))
+          return 'brand_panel_text_contrast';
+        if (/^brand panel \\d{1,2} has no visible text candidates$/.test(value))
+          return 'brand_panel_text_missing';
+        if (value === 'brand-panel sections missing from rendered NEN page') return 'brand_panel_missing';
         if (value === 'visible image load failure') return 'image_load_failure';
         if (value === 'stylesheet request failed') return 'css_load_failure';
         if (value === 'incomplete site shell') return 'site_shell';
         if (value === 'redundant section navigation returned') return 'duplicated_navigation';
         return 'other';
       }),
+      contrastFailures:result.failures.flatMap((value) => {
+        if (typeof value !== 'string') return [];
+        const m=/^brand panel (\\d{1,2}) (h1|h2|p) foreground\\/background contrast (unknown|\\d+(?:\\.\\d+)?):1 below (3|4\\.5):1$/.exec(value);
+        if (!m) return [];
+        const ratio=m[3]==='unknown'?null:Number(m[3]);
+        return [{panel:Number(m[1]),tag:m[2],ratio:Number.isFinite(ratio)?ratio:null,minimum:Number(m[4])}];
+      }).slice(0,8),
       overflowCandidates:(Array.isArray(result.overflowCandidates)?result.overflowCandidates:[])
         .slice(0,8).map(c=>({tag:/^[a-z0-9-]{1,20}$/.test(c?.tag??'')?c.tag:null,
           excessRight:Number.isFinite(c?.excessRight)?Math.round(c.excessRight):null,
