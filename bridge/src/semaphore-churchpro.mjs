@@ -99,6 +99,104 @@ function failureSummary(payload) {
   };
 }
 
+const CHURCHPRO_QA_REPORTS = Object.freeze([
+  'qa-intel/churchpro/agent-handoff.json',
+  'qa-intel/churchpro/gather-browser-handoff.json',
+]);
+const REPORT_MAX_BYTES = 65536;
+function trustedArtifactHost(value) {
+  let url;
+  try { url = new URL(value); } catch { throw Error('Invalid artifact location'); }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== 'https:' || url.username || url.password || url.port ||
+      !(host === 'storage.googleapis.com' || host.endsWith('.storage.googleapis.com') ||
+        host === 's3.amazonaws.com' || host.endsWith('.s3.amazonaws.com') ||
+        /^[a-z0-9.-]+\.s3\.[a-z0-9-]+\.amazonaws\.com$/.test(host) ||
+        host === 'artifacts.semaphoreci.com' || host.endsWith('.artifacts.semaphoreci.com'))) {
+    throw Error('Invalid artifact location');
+  }
+  return url;
+}
+async function downloadSanitizedReport(value, requestFn) {
+  let url = trustedArtifactHost(value);
+  for (let redirects = 0; redirects < 3; redirects++) {
+    const response = await requestFn(url.toString(), {
+      method: 'GET', redirect: 'manual', headers: { Accept: 'application/json' },
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location');
+      if (!location) throw Error('Artifact download failed');
+      url = trustedArtifactHost(new URL(location, url).toString());
+      continue;
+    }
+    if (!response.ok || !response.body) throw Error('Artifact download failed');
+    const announced = Number(response.headers.get('content-length') || 0);
+    if (!Number.isFinite(announced) || announced > REPORT_MAX_BYTES) throw Error('Report too large');
+    const reader = response.body.getReader();
+    const chunks = [];
+    let count = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      count += value.length;
+      if (count > REPORT_MAX_BYTES) {
+        await reader.cancel();
+        throw Error('Report too large');
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(count);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+    try { return JSON.parse(new TextDecoder().decode(bytes)); }
+    catch { throw Error('Invalid sanitized QA report'); }
+  }
+  throw Error('Artifact download failed');
+}
+function safeIntent(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,110}$/.test(value)
+    ? value : 'redacted';
+}
+function summaryFromReport(data, path, revision) {
+  if (!data || typeof data !== 'object' || Array.isArray(data) ||
+      data.schemaVersion !== 1 && path.endsWith('agent-handoff.json')) {
+    throw Error('Invalid sanitized QA report');
+  }
+  if (path.endsWith('agent-handoff.json')) {
+    if (data.project !== 'churchpro' || data.product !== 'ChurchPro' ||
+        data.revision !== revision || !Array.isArray(data.checks) ||
+        data.checks.length > 100) throw Error('QA report source mismatch');
+    const failed = data.checks.filter(entry => entry?.status !== 'passed');
+    return {
+      type: 'qa-intel-api',
+      status: data.evidenceStatus === 'passed' ? 'passed' : 'failed',
+      passed: data.checks.length - failed.length,
+      total: data.checks.length,
+      failed: failed.slice(0, 30).map(entry => ({
+        intent: safeIntent(entry?.intent),
+        status: entry?.status === 'not_executed' ? 'not_executed' : 'failed',
+        ...(typeof entry?.diagnostic === 'string' ? { diagnostic: safeIntent(entry.diagnostic) } : {}),
+      })),
+    };
+  }
+  if (data.sourceSha !== revision || data.evidence !== 'disposable-real-postgresql-nest-browser' ||
+      !Array.isArray(data.cases) || data.cases.length > 50) {
+    throw Error('Browser report source mismatch');
+  }
+  const failed = data.cases.filter(entry => entry?.status !== 'passed');
+  return {
+    type: 'gather-browser',
+    status: data.status === 'passed' ? 'passed' : 'failed',
+    passed: data.cases.length - failed.length,
+    total: data.cases.length,
+    failed: failed.slice(0, 30).map(entry => ({
+      intent: safeIntent(entry?.id),
+      status: 'failed',
+      ...(typeof entry?.kind === 'string' ? { diagnostic: safeIntent(entry.kind) } : {}),
+    })),
+  };
+}
+
 /** A private Queue caller must use explicit, validated project + action. */
 export async function executeSemaphoreChurchPro(env, command, requestFn = fetch) {
   if (command.project !== CHURCHPRO_SEMAPHORE.project || command.provider !== 'semaphore') {
@@ -112,7 +210,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       projectConfigured: UUID.test(env.SEMAPHORE_PROJECT_ID_CHURCH_PRO ?? ''),
       allowedBranches: [CHURCHPRO_SEMAPHORE.branch],
       availableModes: ['validation'],
-      allowedActions: ['health', 'trigger', 'inspect'],
+      allowedActions: ['health', 'trigger', 'inspect', 'churchpro_report'],
     };
   }
   const id = projectId(env);
@@ -139,6 +237,54 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       requestedRevision: command.commitSha,
       pipelineId: response.pipeline_id,
       workflowId: response.workflow_id,
+    };
+  }
+  if (command.action === 'churchpro_report') {
+    if (!UUID.test(command.pipelineId ?? '') || !UUID.test(command.jobId ?? '') ||
+        !CHURCHPRO_QA_REPORTS.includes(command.artifactPath)) {
+      throw Error('ChurchPro report access not permitted');
+    }
+    const basics = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
+      undefined, requestFn);
+    const pipeline = checkedPipeline(basics, id);
+    if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId) {
+      throw Error('ChurchPro pipeline identity mismatch');
+    }
+    if (!SHA.test(pipeline.commit_sha ?? '')) throw Error('ChurchPro source identity missing');
+    const details = await semaphoreRequest(env, '/pipelines/' + command.pipelineId +
+      '?detailed=true', undefined, requestFn);
+    const detailed = details?.pipeline;
+    if (!detailed || (detailed.project_id && detailed.project_id !== id) ||
+        (detailed.branch_name && detailed.branch_name !== CHURCHPRO_SEMAPHORE.branch) ||
+        (detailed.ppl_id && detailed.ppl_id !== command.pipelineId) ||
+        (detailed.wf_id && detailed.wf_id !== pipeline.wf_id)) {
+      throw Error('ChurchPro workflow identity mismatch');
+    }
+    const jobs = (Array.isArray(details.blocks) ? details.blocks : [])
+      .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
+    const job = jobs.find(item => item?.job_id === command.jobId &&
+      item.status === 'finished');
+    if (!job) throw Error('ChurchPro QA job ownership mismatch');
+    const params = '?scope=jobs&scope_id=' + command.jobId +
+      '&path=' + encodeURIComponent(command.artifactPath);
+    const listing = await semaphoreRequest(env, '/artifacts' + params,
+      undefined, requestFn);
+    const record = (Array.isArray(listing.artifacts) ? listing.artifacts : [])
+      .find(entry => entry.path === command.artifactPath && entry.is_directory === false);
+    if (!record || (Number.isInteger(record.size) &&
+        (record.size < 0 || record.size > REPORT_MAX_BYTES))) throw Error('QA artifact unavailable');
+    const result = await semaphoreRequest(env, '/artifacts/signed_url' + params +
+      '&method=GET', undefined, requestFn);
+    const signed = (Array.isArray(result.items) ? result.items : [])
+      .find(item => item.path === command.artifactPath && typeof item.url === 'string');
+    if (!signed) throw Error('QA artifact unavailable');
+    const data = await downloadSanitizedReport(signed.url, requestFn);
+    return {
+      provider: 'semaphore',
+      project: 'churchpro',
+      pipelineId: command.pipelineId,
+      revision: pipeline.commit_sha,
+      ...summaryFromReport(data, command.artifactPath, pipeline.commit_sha),
     };
   }
   if (command.action === 'inspect') {
