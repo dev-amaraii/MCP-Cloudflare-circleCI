@@ -12,7 +12,7 @@ export const NEN_PREVIEW = Object.freeze({
 });
 export const NEN_PREVIEW_42 = Object.freeze({
   branch:'fix/nen-brand-panel-fallback-20261112',
-  commitSha:'31d52bdacfe2e69844e7f73d153992480cb8a36f',
+  commitSha:'37c9cf48f115ae070177275f790dffba93846531',
   base:'https://nen-website-cms-staging-git-fix-nen-brand-p-8580eb-amaraii-team.vercel.app',
   pipelineFile:'.semaphore/semaphore.yml',
 });
