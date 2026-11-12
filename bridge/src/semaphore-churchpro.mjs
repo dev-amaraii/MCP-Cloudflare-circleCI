@@ -48,7 +48,10 @@ function enumValue(value, allowed) {
     ? value.toLowerCase() : null;
 }
 
-const CHURCHPRO_INSPECT_ONLY_BRANCH = 'codex/churchpro-phase2-departments-foundation-20261112';
+const CHURCHPRO_INSPECT_ONLY_BRANCHES = Object.freeze([
+  'codex/churchpro-phase2-departments-foundation-20261112',
+  'codex/churchpro-phase2-department-operations-20261112',
+]);
 function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
   if (!pipeline || pipeline.project_id !== expectedId ||
@@ -488,7 +491,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     if (!UUID.test(command.pipelineId ?? '')) throw Error('Invalid ChurchPro pipeline identity');
     const base = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
       undefined, requestFn);
-    const pipeline = checkedPipeline(base, id, [CHURCHPRO_SEMAPHORE.branch, CHURCHPRO_INSPECT_ONLY_BRANCH]);
+    const pipeline = checkedPipeline(base, id, [CHURCHPRO_SEMAPHORE.branch, ...CHURCHPRO_INSPECT_ONLY_BRANCHES]);
     if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId) {
       throw Error('ChurchPro Semaphore pipeline identity mismatch');
     }
