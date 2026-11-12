@@ -58,6 +58,47 @@ function checkedPipeline(response, expectedId) {
   return pipeline;
 }
 
+// Semaphore logs are untrusted and can contain secret-bearing stdout.
+// Return only short diagnostic patterns, never raw events or signed links.
+function failureSummary(payload) {
+  const events = Array.isArray(payload?.events) ? payload.events.slice(0, 4000) : [];
+  let current = null;
+  let lastFailure = null;
+  for (const event of events) {
+    if (!event || typeof event !== 'object') continue;
+    if (event.event === 'cmd_started') {
+      current = {
+        command: typeof event.directive === 'string' ? event.directive.slice(0, 120) : '',
+        output: '',
+      };
+    } else if (event.event === 'cmd_output' && current && typeof event.output === 'string') {
+      current.output = (current.output + event.output.slice(0, 2000)).slice(-16000);
+    } else if (event.event === 'cmd_finished' && current) {
+      if (Number.isInteger(event.exit_code) && event.exit_code !== 0) {
+        lastFailure = { ...current, exitCode: event.exit_code };
+      }
+      current = null;
+    }
+  }
+  if (!lastFailure) return null;
+  const redact = (value) => value
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[email]')
+    .replace(/\b(?:Bearer|Token|Authorization)\s*[:=]?\s*\S+/gi, '[redacted]')
+    .replace(/\b(?:sk-|ghp_|github_pat_|semaphore_)[A-Za-z0-9_-]+/gi, '[redacted]')
+    .replace(/\b[A-Za-z0-9+/_=-]{32,}\b/g, '[redacted]')
+    .slice(0, 180);
+  const lines = lastFailure.output.split(/\r?\n/)
+    .filter(line => /(?:error:|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed)/i.test(line))
+    .filter(line => !/(?:API[_-]?KEY|SECRET|PASSWORD|TOKEN|AUTHORIZATION|PRIVATE[_-]?KEY)\s*[:=]/i.test(line))
+    .slice(-10).map(redact);
+  return {
+    command: redact(lastFailure.command),
+    exitCode: lastFailure.exitCode,
+    diagnosticLines: [...new Set(lines)],
+  };
+}
+
 /** A private Queue caller must use explicit, validated project + action. */
 export async function executeSemaphoreChurchPro(env, command, requestFn = fetch) {
   if (command.project !== CHURCHPRO_SEMAPHORE.project || command.provider !== 'semaphore') {
@@ -132,7 +173,23 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
           result: enumValue(job.result, ['passed', 'failed', 'stopped', 'canceled', 'skipped']),
         })),
       }));
+    const failed = blocks.flatMap(block => block.jobs)
+      .find(job => job.id && job.result === 'failed');
+    let failure = null;
+    if (failed) {
+      try {
+        const logs = await semaphoreRequest(env, '/logs/' + failed.id, undefined, requestFn);
+        failure = { jobId: failed.id, ...(
+          failureSummary(logs) ?? { diagnostic: 'No failed-command diagnostic available' }
+        ) };
+      } catch {
+        failure = { jobId: failed.id, diagnostic: 'Failed-job logs unavailable' };
+      }
+    } else if (pipeline.result === 'failed') {
+      failure = { diagnostic: 'Pipeline failed before a job-level error could be identified' };
+    }
     return {
+      ...(failure ? { failure } : {}),
       provider: 'semaphore',
       project: CHURCHPRO_SEMAPHORE.project,
       pipelineId: command.pipelineId,
