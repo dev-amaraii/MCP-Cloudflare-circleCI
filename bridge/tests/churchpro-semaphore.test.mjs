@@ -360,3 +360,51 @@ test('ChurchPro visual PNG reads are restricted to synthetic review filenames', 
   }), /ownership mismatch/);
   assert.equal(requests.length, 1, 'Foreign project must not leak images or artifact paths');
 });
+
+test('department PR #20 is read-only inspectable without expanding triggers, artifacts or foreign-project access', async () => {
+  const branch = 'codex/churchpro-phase2-departments-foundation-20261112';
+  assert.throws(() => valid(command('trigger', {
+    branch, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+
+  const basic = { pipeline: {
+    ppl_id: pipelineId, wf_id: workflowId, project_id: projectId,
+    branch_name: branch, state: 'done', result: 'failed', commit_sha: revision,
+  } };
+  const calls = [];
+  const out = await execute(command('inspect', { pipelineId }), async url => {
+    calls.push(url);
+    if (calls.length === 1) return response(basic);
+    if (calls.length === 2) return response({
+      pipeline: { ...basic.pipeline },
+      blocks: [{ name: 'Disposable PostgreSQL', state: 'done', result: 'failed',
+        jobs: [{ job_id: id, name: 'Drizzle and integration', status: 'finished', result: 'failed' }] }],
+    });
+    return response({ events: [
+      { event: 'cmd_started', directive: 'corepack pnpm --filter @churchpro/database db:check' },
+      { event: 'cmd_output', output: 'error: synthetic schema mismatch' },
+      { event: 'cmd_finished', exit_code: 1 },
+    ] });
+  });
+  assert.equal(out.project, 'churchpro');
+  assert.equal(out.vcs.branch, branch);
+  assert.equal(out.vcs.revision, revision);
+  assert.equal(out.failure.exitCode, 1);
+  assert.equal(calls.length, 3);
+
+  for (const invalid of [
+    { ...basic.pipeline, branch_name: 'main' },
+    { ...basic.pipeline, project_id: otherProjectId },
+  ]) {
+    const denied = [];
+    await assert.rejects(execute(command('inspect', { pipelineId }), async url => {
+      denied.push(url);
+      return response({ pipeline: invalid });
+    }), /ownership mismatch/);
+    assert.equal(denied.length, 1, 'deny before detailed jobs or logs');
+  }
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId, jobId: id,
+  }), async () => response(basic)), /ownership mismatch/,
+  'PR #20 must not acquire PR #18 artifact access');
+});
