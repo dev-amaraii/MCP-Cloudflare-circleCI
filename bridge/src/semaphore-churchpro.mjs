@@ -112,7 +112,8 @@ function trustedArtifactHost(value) {
       !(host === 'storage.googleapis.com' || host.endsWith('.storage.googleapis.com') ||
         host === 's3.amazonaws.com' || host.endsWith('.s3.amazonaws.com') ||
         /^[a-z0-9.-]+\.s3\.[a-z0-9-]+\.amazonaws\.com$/.test(host) ||
-        host === 'artifacts.semaphoreci.com' || host.endsWith('.artifacts.semaphoreci.com'))) {
+        host === 'artifacts.semaphoreci.com' || host.endsWith('.artifacts.semaphoreci.com') ||
+        host.endsWith('.r2.cloudflarestorage.com'))) {
     throw Error('Invalid artifact location');
   }
   return url;
@@ -153,6 +154,54 @@ async function downloadSanitizedReport(value, requestFn) {
   }
   throw Error('Artifact download failed');
 }
+
+function pngBase64(bytes) {
+  let binary = '';
+  for (let n = 0; n < bytes.length; n += 16384) {
+    binary += String.fromCharCode(...bytes.subarray(n, n + 16384));
+  }
+  return btoa(binary);
+}
+async function downloadBoundedPng(signedUrl, requestFn) {
+  let url = trustedArtifactHost(signedUrl);
+  const maxBytes = 2_500_000;
+  for (let redirects = 0; redirects < 3; redirects++) {
+    const res = await requestFn(url.toString(), { method: 'GET',
+      redirect: 'manual', headers: { Accept: 'image/png' } });
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const location = res.headers.get('location');
+      if (!location) throw Error('ChurchPro PNG download failed');
+      url = trustedArtifactHost(new URL(location, url).toString());
+      continue;
+    }
+    if (!res.ok || !res.body) throw Error('ChurchPro PNG download failed');
+    const announced = Number(res.headers.get('content-length') || 0);
+    if (!Number.isFinite(announced) || announced > maxBytes) throw Error('ChurchPro PNG too large');
+    const reader = res.body.getReader(), chunks = [];
+    let length = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > maxBytes) { await reader.cancel(); throw Error('ChurchPro PNG too large'); }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(length); let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    if (length < 33 || ![137,80,78,71,13,10,26,10].every((n,i) => bytes[i] === n) ||
+        String.fromCharCode(...bytes.subarray(12,16)) !== 'IHDR') {
+      throw Error('ChurchPro PNG format mismatch');
+    }
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = dv.getUint32(16), height = dv.getUint32(20);
+    if (width < 320 || width > 2500 || height < 200 || height > 30000) {
+      throw Error('ChurchPro PNG dimensions invalid');
+    }
+    return { width, height, bytes: length, dataBase64: pngBase64(bytes) };
+  }
+  throw Error('ChurchPro PNG redirect limit');
+}
+
 function safeIntent(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,110}$/.test(value)
     ? value : 'redacted';
@@ -210,7 +259,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       projectConfigured: UUID.test(env.SEMAPHORE_PROJECT_ID_CHURCH_PRO ?? ''),
       allowedBranches: [CHURCHPRO_SEMAPHORE.branch],
       availableModes: ['validation'],
-      allowedActions: ['health', 'trigger', 'inspect', 'churchpro_report', 'churchpro_artifact_probe'],
+      allowedActions: ['health', 'trigger', 'inspect', 'churchpro_report', 'churchpro_artifact_probe', 'churchpro_png'],
     };
   }
   const id = projectId(env);
@@ -239,6 +288,69 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       workflowId: response.workflow_id,
     };
   }
+  if (command.action === 'churchpro_png') {
+    const allowed = /^(?:people-390|navigation-390|cells-390|church-1280|people-1280|people-320|church-768|cells-1440|people-dark-1280|person-detail-390|cell-roster-390|staff-1280|staff-removed-1280)\.png$/u;
+    const file = typeof command.artifactPath === 'string' &&
+      command.artifactPath.startsWith('visual-review/')
+      ? command.artifactPath.slice('visual-review/'.length) : '';
+    if (!UUID.test(command.pipelineId ?? '') || !UUID.test(command.jobId ?? '') ||
+        !allowed.test(file)) throw Error('ChurchPro PNG access not permitted');
+    const base = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
+      undefined, requestFn);
+    const pipeline = checkedPipeline(base, id);
+    if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId ||
+        !SHA.test(pipeline.commit_sha ?? '') || !UUID.test(pipeline.wf_id ?? '')) {
+      throw Error('ChurchPro PNG ownership mismatch');
+    }
+    const details = await semaphoreRequest(env, '/pipelines/' + command.pipelineId +
+      '?detailed=true', undefined, requestFn);
+    if (!details?.pipeline || details.pipeline.wf_id &&
+        details.pipeline.wf_id !== pipeline.wf_id ||
+        details.pipeline.project_id && details.pipeline.project_id !== id) {
+      throw Error('ChurchPro PNG ownership mismatch');
+    }
+    const jobs = (Array.isArray(details.blocks) ? details.blocks : [])
+      .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
+    if (!jobs.some(job => job?.job_id === command.jobId &&
+        job?.result?.toLowerCase() === 'passed')) {
+      throw Error('ChurchPro PNG job ownership mismatch');
+    }
+    const scope = '?scope=jobs&scope_id=' + command.jobId;
+    const listing = await semaphoreRequest(env, '/artifacts' + scope +
+      '&path=visual-review', undefined, requestFn);
+    const paths = Array.isArray(listing.artifacts) ? listing.artifacts : [];
+    const target = paths.find(entry => entry?.path === command.artifactPath &&
+      !entry.is_directory);
+    const manifestEntry = paths.find(entry => entry?.path === 'visual-review/manifest.json' &&
+      !entry.is_directory);
+    if (!target || !manifestEntry || (Number.isInteger(target.size) &&
+        (target.size < 33 || target.size > 2_500_000)) ||
+        (Number.isInteger(manifestEntry.size) &&
+        (manifestEntry.size < 2 || manifestEntry.size > REPORT_MAX_BYTES))) {
+      throw Error('ChurchPro PNG artifact unavailable');
+    }
+    const signedPath = async path => {
+      const data = await semaphoreRequest(env, '/artifacts/signed_url' +
+        scope + '&path=' + encodeURIComponent(path) + '&method=GET',
+        undefined, requestFn);
+      const signed = (Array.isArray(data.items) ? data.items : [])
+        .find(item => item.path === path && typeof item.url === 'string');
+      if (!signed) throw Error('ChurchPro PNG signature unavailable');
+      return signed.url;
+    };
+    const manifest = await downloadSanitizedReport(
+      await signedPath('visual-review/manifest.json'), requestFn);
+    if (!manifest || manifest.sourceSha !== pipeline.commit_sha ||
+        manifest.fixture !== 'disposable-synthetic' || manifest.status !== 'passed' ||
+        !Array.isArray(manifest.files) || !manifest.files.includes(file)) {
+      throw Error('ChurchPro PNG provenance mismatch');
+    }
+    const image = await downloadBoundedPng(await signedPath(command.artifactPath), requestFn);
+    return { provider:'semaphore', project:'churchpro',
+      pipelineId:command.pipelineId, revision:pipeline.commit_sha,
+      path:command.artifactPath, mediaType:'image/png', ...image };
+  }
+
   if (command.action === 'churchpro_artifact_probe') {
     if (!UUID.test(command.pipelineId ?? '') || !UUID.test(command.jobId ?? '')) {
       throw Error('ChurchPro artifact probe not permitted');
