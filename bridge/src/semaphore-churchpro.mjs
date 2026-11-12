@@ -264,16 +264,18 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
     const job = jobs.find(item => item?.job_id === command.jobId);
     if (!job) throw Error('ChurchPro QA job ownership mismatch');
-    const params = '?scope=jobs&scope_id=' + command.jobId +
-      '&path=' + encodeURIComponent(command.artifactPath);
-    const listing = await semaphoreRequest(env, '/artifacts' + params,
+    const scope = '?scope=jobs&scope_id=' + command.jobId;
+    // The artifacts list endpoint enumerates directory children, not a file path.
+    const listing = await semaphoreRequest(env, '/artifacts' + scope +
+      '&path=' + encodeURIComponent('qa-intel/churchpro'),
       undefined, requestFn);
     const record = (Array.isArray(listing.artifacts) ? listing.artifacts : [])
       .find(entry => entry.path === command.artifactPath && entry.is_directory === false);
     if (!record || (Number.isInteger(record.size) &&
         (record.size < 0 || record.size > REPORT_MAX_BYTES))) throw Error('QA artifact unavailable');
-    const result = await semaphoreRequest(env, '/artifacts/signed_url' + params +
-      '&method=GET', undefined, requestFn);
+    const result = await semaphoreRequest(env, '/artifacts/signed_url' + scope +
+      '&path=' + encodeURIComponent(command.artifactPath) + '&method=GET',
+      undefined, requestFn);
     const signed = (Array.isArray(result.items) ? result.items : [])
       .find(item => item.path === command.artifactPath && typeof item.url === 'string');
     if (!signed) throw Error('QA artifact unavailable');
