@@ -48,10 +48,11 @@ function enumValue(value, allowed) {
     ? value.toLowerCase() : null;
 }
 
-function checkedPipeline(response, expectedId) {
+const CHURCHPRO_INSPECT_ONLY_BRANCH = 'codex/churchpro-phase2-departments-foundation-20261112';
+function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
   if (!pipeline || pipeline.project_id !== expectedId ||
-      pipeline.branch_name !== CHURCHPRO_SEMAPHORE.branch ||
+      !allowedBranches.includes(pipeline.branch_name) ||
       (pipeline.ppl_id !== undefined && !UUID.test(pipeline.ppl_id))) {
     throw Error('ChurchPro Semaphore pipeline ownership mismatch');
   }
@@ -487,7 +488,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     if (!UUID.test(command.pipelineId ?? '')) throw Error('Invalid ChurchPro pipeline identity');
     const base = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
       undefined, requestFn);
-    const pipeline = checkedPipeline(base, id);
+    const pipeline = checkedPipeline(base, id, [CHURCHPRO_SEMAPHORE.branch, CHURCHPRO_INSPECT_ONLY_BRANCH]);
     if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId) {
       throw Error('ChurchPro Semaphore pipeline identity mismatch');
     }
@@ -498,7 +499,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     const detailed = details?.pipeline;
     if (!detailed ||
         (detailed.project_id && detailed.project_id !== id) ||
-        (detailed.branch_name && detailed.branch_name !== CHURCHPRO_SEMAPHORE.branch) ||
+        (detailed.branch_name && detailed.branch_name !== pipeline.branch_name) ||
         (detailed.ppl_id && detailed.ppl_id !== command.pipelineId) ||
         (detailed.wf_id && detailed.wf_id !== pipeline.wf_id)) {
       throw Error('ChurchPro Semaphore workflow identity mismatch');
@@ -540,7 +541,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       state: enumValue(pipeline.state, ['pending', 'running', 'done', 'stopping', 'stopped', 'queued']),
       result: enumValue(pipeline.result, ['passed', 'failed', 'stopped', 'canceled', 'skipped']),
       vcs: {
-        branch: CHURCHPRO_SEMAPHORE.branch,
+        branch: pipeline.branch_name,
         revision: SHA.test(pipeline.commit_sha ?? '') ? pipeline.commit_sha : null,
       },
       blocks,
