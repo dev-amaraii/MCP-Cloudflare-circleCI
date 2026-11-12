@@ -89,7 +89,7 @@ function failureSummary(payload) {
     .replace(/\b[A-Za-z0-9+/_=-]{32,}\b/g, '[redacted]')
     .slice(0, 180);
   const lines = lastFailure.output.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
-    .filter(line => /(?:\berror\b|\bwarning\b|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed|✖)/i.test(line))
+    .filter(line => /(?:\berror\b|\bwarning\b|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed|BROWSER_CASE_(?:FAIL|DIAGNOSTIC)|QA_INTEL_API|✖)/i.test(line))
     .filter(line => !/(?:API[_-]?KEY|SECRET|PASSWORD|TOKEN|AUTHORIZATION|PRIVATE[_-]?KEY)\s*[:=]/i.test(line))
     .slice(-10).map(redact);
   return {
@@ -320,23 +320,24 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
           result: enumValue(job.result, ['passed', 'failed', 'stopped', 'canceled', 'skipped']),
         })),
       }));
-    const failed = blocks.flatMap(block => block.jobs)
-      .find(job => job.id && job.result === 'failed');
-    let failure = null;
-    if (failed) {
+    const failedJobs = blocks.flatMap(block => block.jobs)
+      .filter(job => job.id && job.result === 'failed').slice(0, 3);
+    const failures = [];
+    for (const job of failedJobs) {
       try {
-        const logs = await semaphoreRequest(env, '/logs/' + failed.id, undefined, requestFn);
-        failure = { jobId: failed.id, ...(
+        const logs = await semaphoreRequest(env, '/logs/' + job.id, undefined, requestFn);
+        failures.push({ jobId: job.id, ...(
           failureSummary(logs) ?? { diagnostic: 'No failed-command diagnostic available' }
-        ) };
+        ) });
       } catch {
-        failure = { jobId: failed.id, diagnostic: 'Failed-job logs unavailable' };
+        failures.push({ jobId: job.id, diagnostic: 'Failed-job logs unavailable' });
       }
-    } else if (pipeline.result === 'failed') {
-      failure = { diagnostic: 'Pipeline failed before a job-level error could be identified' };
+    }
+    if (failures.length === 0 && pipeline.result === 'failed') {
+      failures.push({ diagnostic: 'Pipeline failed before a job-level error could be identified' });
     }
     return {
-      ...(failure ? { failure } : {}),
+      ...(failures.length ? { failure: failures[0], failures } : {}),
       provider: 'semaphore',
       project: CHURCHPRO_SEMAPHORE.project,
       pipelineId: command.pipelineId,
