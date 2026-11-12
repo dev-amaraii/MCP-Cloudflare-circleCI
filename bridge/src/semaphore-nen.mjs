@@ -1,6 +1,6 @@
-/** Isolated NEN Semaphore diagnostics plus one reviewed validation-only workflow.
+/** Isolated NEN Semaphore diagnostics plus two reviewed, SHA-pinned validation-only workflows.
  * No caller-selected project, origin, token, pipeline file, or release mode.
- * The approved preview trigger is pinned to one branch and exact SHA.
+ * The approved preview trigger is limited to the two reviewed branch/SHA pairs.
  * AmaraiiOS retains its independent SEMAPHORE_PROJECT_ID binding.
  */
 const API = 'https://amaraii.semaphoreci.com/api/v1alpha';
@@ -10,6 +10,13 @@ export const NEN_PREVIEW = Object.freeze({
   base:'https://nen-website-cms-staging-git-fix-nen-mobile-fe8706-amaraii-team.vercel.app',
   pipelineFile:'.semaphore/semaphore.yml',
 });
+export const NEN_PREVIEW_42 = Object.freeze({
+  branch:'fix/nen-brand-panel-fallback-20261112',
+  commitSha:'37c9cf48f115ae070177275f790dffba93846531',
+  base:'https://nen-website-cms-staging-git-fix-nen-brand-p-8580eb-amaraii-team.vercel.app',
+  pipelineFile:'.semaphore/semaphore.yml',
+});
+export const NEN_APPROVED_PREVIEWS = Object.freeze([NEN_PREVIEW, NEN_PREVIEW_42]);
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{40}$/;
 const ARTIFACT_DIR = 'qa-intel/nen-production';
@@ -39,8 +46,9 @@ async function apiGet(env, path, requestFn) {
   return value;
 }
 async function triggerPreview(env, command, requestFn) {
-  if (command.branch !== NEN_PREVIEW.branch || command.commitSha !== NEN_PREVIEW.commitSha)
-    throw Error('NEN preview revision not permitted');
+  const preview = NEN_APPROVED_PREVIEWS.find((p) =>
+    command.branch === p.branch && command.commitSha === p.commitSha);
+  if (!preview) throw Error('NEN preview revision not permitted');
   if (!tokenReady(env)) throw Error('Semaphore token not configured');
   const response = await requestFn(API+'/plumber-workflows',{
     method:'POST',redirect:'manual',
@@ -49,9 +57,9 @@ async function triggerPreview(env, command, requestFn) {
       'User-Agent':'SemaphoreCI v2.0 Client'},
     body:JSON.stringify({
       project_id:projectId(env),
-      reference:'refs/heads/'+NEN_PREVIEW.branch,
-      commit_sha:NEN_PREVIEW.commitSha,
-      pipeline_file:NEN_PREVIEW.pipelineFile,
+      reference:'refs/heads/'+preview.branch,
+      commit_sha:preview.commitSha,
+      pipeline_file:preview.pipelineFile,
     }),
   });
   if (!response.ok) throw Error('NEN Semaphore API HTTP '+response.status);
@@ -59,7 +67,7 @@ async function triggerPreview(env, command, requestFn) {
   if (!UUID.test(data?.workflow_id??'') || !UUID.test(data?.pipeline_id??''))
     throw Error('Invalid NEN preview workflow response');
   return {provider:'semaphore',project:'nen-website-cms',
-    branch:NEN_PREVIEW.branch,revision:NEN_PREVIEW.commitSha,
+    branch:preview.branch,revision:preview.commitSha,
     pipelineId:data.pipeline_id,workflowId:data.workflow_id,
     validationOnly:true,releasePermitted:false};
 }
@@ -152,7 +160,7 @@ function safeReport(data) {
       !Number.isInteger(data.failures) || data.failures < 0 || data.failures > data.count ||
       typeof data.base !== 'string' ||
       !(/^https:\/\/(?:www\.)?neninternational\.com\/?$/.test(data.base) ||
-        data.base === NEN_PREVIEW.base)) {
+        NEN_APPROVED_PREVIEWS.some((p) => data.base === p.base))) {
     throw Error('Invalid NEN QA report');
   }
   const failures=[];
@@ -171,12 +179,24 @@ function safeReport(data) {
         if (value.startsWith('execution:')) return 'browser_execution';
         if (value === 'NEN brand CSS tokens missing') return 'brand_tokens_missing';
         if (value.startsWith('hero background lost contrast')) return 'hero_contrast';
+        if (/^brand panel \d{1,2} (?:h1|h2|p) foreground\/background contrast (?:unknown|\d+(?:\.\d+)?):1 below (?:3|4\.5):1$/.test(value))
+          return 'brand_panel_text_contrast';
+        if (/^brand panel \d{1,2} has no visible text candidates$/.test(value))
+          return 'brand_panel_text_missing';
+        if (value === 'brand-panel sections missing from rendered NEN page') return 'brand_panel_missing';
         if (value === 'visible image load failure') return 'image_load_failure';
         if (value === 'stylesheet request failed') return 'css_load_failure';
         if (value === 'incomplete site shell') return 'site_shell';
         if (value === 'redundant section navigation returned') return 'duplicated_navigation';
         return 'other';
       }),
+      contrastFailures:result.failures.flatMap((value) => {
+        if (typeof value !== 'string') return [];
+        const m=/^brand panel (\d{1,2}) (h1|h2|p) foreground\/background contrast (unknown|\d+(?:\.\d+)?):1 below (3|4\.5):1$/.exec(value);
+        if (!m) return [];
+        const ratio=m[3]==='unknown'?null:Number(m[3]);
+        return [{panel:Number(m[1]),tag:m[2],ratio:Number.isFinite(ratio)?ratio:null,minimum:Number(m[4])}];
+      }).slice(0,8),
       overflowCandidates:(Array.isArray(result.overflowCandidates)?result.overflowCandidates:[])
         .slice(0,8).map(c=>({tag:/^[a-z0-9-]{1,20}$/.test(c?.tag??'')?c.tag:null,
           excessRight:Number.isFinite(c?.excessRight)?Math.round(c.excessRight):null,
@@ -236,7 +256,7 @@ export async function executeSemaphoreNen(env, command, requestFn=fetch) {
   if (command.action === 'health') return {provider:'semaphore',project:'nen-website-cms',
     projectConfigured:UUID.test(env.SEMAPHORE_NEN_PROJECT_ID ?? ''), tokenConfigured:tokenReady(env),
     allowedActions:['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview'],
-    releasePermitted:false,triggerPermitted:true,triggerScope:'single-reviewed-branch-and-exact-sha'};
+    releasePermitted:false,triggerPermitted:true,triggerScope:'reviewed-branch-and-exact-sha-allowlist'};
   if (command.action === 'nen_trigger_preview') return triggerPreview(env,command,requestFn);
   const {pipeline,blocks,workflowId}=await getOwned(env,command.pipelineId,requestFn);
   if (command.action === 'inspect') return {provider:'semaphore',project:'nen-website-cms',

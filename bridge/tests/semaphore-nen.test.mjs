@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {executeSemaphoreNen,NEN_SCREENSHOT,NEN_PREVIEW} from '../src/semaphore-nen.mjs';
+import {executeSemaphoreNen,NEN_SCREENSHOT,NEN_PREVIEW,NEN_PREVIEW_42,NEN_APPROVED_PREVIEWS} from '../src/semaphore-nen.mjs';
 import {validateCommand,executeCommand,processRequest} from '../src/index.mjs';
 const id='11111111-2222-4333-8444-555555555555';
 const pipeline='11111111-2222-4333-8444-555555555551';
@@ -69,7 +69,7 @@ test('health uses distinct NEN binding without network access or secret disclosu
   const result=await executeCommand(env,command('health'),valid(command('health')).project,()=>{throw Error('No network')});
   assert.equal(result.project,'nen-website-cms');assert.equal(result.projectConfigured,true);
   assert.equal(result.releasePermitted,false);assert.equal(result.triggerPermitted,true);
-  assert.equal(result.triggerScope,'single-reviewed-branch-and-exact-sha');
+  assert.equal(result.triggerScope,'reviewed-branch-and-exact-sha-allowlist');
   assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
 });
 test('cross-project pipeline cannot access details or logs',async()=>{
@@ -310,4 +310,57 @@ test('NEN preview detail exposes only fixed preflight categories',async()=>{
     assert.deepEqual(out.errorKinds,['preview_authentication_denied','preview_preflight_'+reason]);
     assert.ok(!JSON.stringify(out).includes(env.SEMAPHORE_TOKEN));
   }
+});
+
+test('NEN reviewed PR42 preview stays restricted to its exact branch, SHA, and staging origin', async()=>{
+  assert.equal(NEN_APPROVED_PREVIEWS.length,2);
+  assert.equal(NEN_PREVIEW_42.branch,'fix/nen-brand-panel-fallback-20261112');
+  assert.equal(NEN_PREVIEW_42.commitSha,'37c9cf48f115ae070177275f790dffba93846531');
+  assert.equal(NEN_PREVIEW_42.base,'https://nen-website-cms-staging-git-fix-nen-brand-p-8580eb-amaraii-team.vercel.app');
+  const c=command('nen_trigger_preview',{branch:NEN_PREVIEW_42.branch,
+    commitSha:NEN_PREVIEW_42.commitSha,mode:'validation'});
+  assert.doesNotThrow(()=>valid(c));
+  // Mixing the old and new pins, or choosing a release mode, must fail.
+  for (const mismatch of [
+    {branch:NEN_PREVIEW.branch}, {commitSha:NEN_PREVIEW.commitSha},
+    {branch:'main'}, {commitSha:'a'.repeat(40)}, {mode:'release'},
+    {pipelineId:pipeline}, {artifactPath:'qa-intel/nen-production/report.json'},
+  ]) assert.throws(()=>valid({...c,...mismatch}),/NEN preview revision not permitted|NEN Semaphore command rejected/);
+  const calls=[];
+  const read=async(url,opts)=>{calls.push({url,opts});return response({workflow_id:workflow,pipeline_id:pipeline});};
+  const out=await executeCommand(env,c,valid(c).project,read);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].url,base+'/plumber-workflows');
+  assert.deepEqual(JSON.parse(calls[0].opts.body),{
+    project_id:projectId,reference:'refs/heads/'+NEN_PREVIEW_42.branch,
+    commit_sha:NEN_PREVIEW_42.commitSha,pipeline_file:'.semaphore/semaphore.yml',
+  });
+  assert.equal(out.releasePermitted,false);
+  assert.ok(!JSON.stringify(out).includes(env.SEMAPHORE_TOKEN));
+  const artifact=new TextEncoder().encode(JSON.stringify({...sampleReport,base:NEN_PREVIEW_42.base}));
+  const result=await executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),mocked({bytes:artifact}).read);
+  assert.equal(result.passed,0);
+  assert.equal(result.failures,1);
+  const rejected=await assert.rejects(executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),
+    mocked({bytes:new TextEncoder().encode(JSON.stringify({...sampleReport,base:'https://other-site.example.com'}))}).read),
+    /Invalid NEN QA report/);
+});
+
+test('NEN contrast report exposes only bounded numeric failures, never page text or tokens',async()=>{
+  const report={...sampleReport,base:NEN_PREVIEW_42.base,results:[{
+    ...sampleReport.results[0],
+    failures:[
+      'brand panel 0 h1 foreground/background contrast 1:1 below 3:1',
+      'brand panel 1 p foreground/background contrast 2.25:1 below 4.5:1',
+      'brand-panel sections missing from rendered NEN page',
+      'secret page body '+env.SEMAPHORE_TOKEN,
+    ],
+  }]};
+  const {read}=mocked({bytes:new TextEncoder().encode(JSON.stringify(report))});
+  const out=await executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),read);
+  assert.deepEqual(out.failuresDetail[0].errors,
+    ['brand_panel_text_contrast','brand_panel_text_contrast','brand_panel_missing','other']);
+  assert.deepEqual(out.failuresDetail[0].contrastFailures,
+    [{panel:0,tag:'h1',ratio:1,minimum:3},{panel:1,tag:'p',ratio:2.25,minimum:4.5}]);
+  assert.ok(!JSON.stringify(out).includes(env.SEMAPHORE_TOKEN));
 });

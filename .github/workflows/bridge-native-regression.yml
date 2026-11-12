@@ -1,0 +1,30 @@
+name: CI bridge native regression
+on:
+  push:
+    branches:
+      - feat/nen-pr42-scoped-visual-qa-20261112
+  pull_request:
+    paths:
+      - "bridge/**"
+      - ".github/workflows/bridge-native-regression.yml"
+permissions:
+  contents: read
+jobs:
+  bridge-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate JS source syntax
+        run: |
+          node --check bridge/src/index.mjs
+          node --check bridge/src/semaphore.mjs
+          node --check bridge/src/semaphore-churchpro.mjs
+          node --check bridge/src/semaphore-nen.mjs
+          node --check bridge/src/provider-routing.mjs
+      - name: Run complete bridge regression suite
+        working-directory: bridge
+        run: npm test
