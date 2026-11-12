@@ -363,6 +363,7 @@ test('ChurchPro visual PNG reads are restricted to synthetic review filenames', 
 
 test('department PR #20 is read-only inspectable without expanding triggers, artifacts or foreign-project access', async () => {
   const branch = 'codex/churchpro-phase2-departments-foundation-20261112';
+  const branchOperations = 'codex/churchpro-phase2-department-operations-20261112';
   assert.throws(() => valid(command('trigger', {
     branch, commitSha: revision, mode: 'validation',
   })), /Branch not permitted/);
@@ -403,6 +404,19 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
     }), /ownership mismatch/);
     assert.equal(denied.length, 1, 'deny before detailed jobs or logs');
   }
+  const departmentOperationsPipeline = { pipeline: { ...basic.pipeline, branch_name: branchOperations } };
+  const validOperations = [];
+  const operations = await execute(command('inspect', { pipelineId }), async url => {
+    validOperations.push(url);
+    if (validOperations.length === 1) return response(departmentOperationsPipeline);
+    return response({ pipeline: departmentOperationsPipeline.pipeline, blocks: [] });
+  });
+  assert.equal(operations.vcs.branch, branchOperations);
+  assert.equal(validOperations.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: branchOperations, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+
   await assert.rejects(execute(command('churchpro_artifact_probe', {
     pipelineId, jobId: id,
   }), async () => response(basic)), /ownership mismatch/,
