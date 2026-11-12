@@ -199,6 +199,9 @@ test('ChurchPro artifact report reads only owned exact-revision sanitized QA sum
   assert.equal(JSON.stringify(out).includes('sig=test'), false);
   assert.equal(JSON.stringify(out).includes(env.SEMAPHORE_TOKEN), false);
   assert.equal(requests.at(-1).init.headers.Authorization, undefined);
+  assert(requests.some(entry => entry.url.includes('/artifacts?') &&
+    entry.url.includes('path=qa-intel%2Fchurchpro')),
+    'Artifact listing must target the directory, not the signed file');
 
   const denied = [];
   await assert.rejects(execute(command('churchpro_report', {
