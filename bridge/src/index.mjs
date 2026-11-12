@@ -8,6 +8,7 @@
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-churchpro.mjs';
 import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_PREVIEW } from './semaphore-nen.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
@@ -223,6 +224,8 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (provider === 'semaphore' && !(
       (command.project === 'amaraii-os' &&
         ['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action)) ||
+      (command.project === 'churchpro' &&
+        ['health','trigger','inspect'].includes(command.action)) ||
       (command.project === 'nen-website-cms' &&
         ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview'].includes(command.action)))) {
     throw new Error('Semaphore action not permitted');
@@ -274,7 +277,9 @@ export function validateCommand(command, keyId, now = Date.now()) {
       if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha))
         throw new Error('Invalid automatic CI revision');
     }
-    const branches = provider === 'semaphore' ? SEMAPHORE_BRANCHES : project.branches;
+    const branches = provider === 'semaphore'
+      ? (command.project === 'churchpro' ? [CHURCHPRO_SEMAPHORE.branch] : SEMAPHORE_BRANCHES)
+      : project.branches;
     if (typeof command.branch !== 'string' || !branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (provider === 'semaphore') {
       if (command.mode !== 'validation') throw new Error('Pipeline mode not permitted');
@@ -452,8 +457,11 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return {...result,provider:'circleci',requestedRevision:command.commitSha,
       revisionVerificationRequired:true,selectionReason:selection.reason};
   }
-  if (command.provider === 'semaphore') return command.project === 'nen-website-cms'
-    ? executeSemaphoreNen(env,command,requestFn) : executeSemaphore(env,command,requestFn);
+  if (command.provider === 'semaphore') {
+    if (command.project === 'nen-website-cms') return executeSemaphoreNen(env,command,requestFn);
+    if (command.project === 'churchpro') return executeSemaphoreChurchPro(env,command,requestFn);
+    return executeSemaphore(env,command,requestFn);
+  }
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',
