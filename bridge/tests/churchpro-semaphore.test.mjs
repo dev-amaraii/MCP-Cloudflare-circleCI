@@ -144,6 +144,100 @@ test('inspect requires a pipeline belonging to the ChurchPro project and branch'
   /ownership mismatch/);
 });
 
+
+test('ChurchPro artifact report reads only owned exact-revision sanitized QA summaries', async () => {
+  const path = 'qa-intel/churchpro/agent-handoff.json';
+  assert.equal(valid(command('churchpro_report', { pipelineId, jobId: id, artifactPath: path })).project,
+    PROJECTS.churchpro);
+  for (const bad of [
+    { pipelineId, jobId: id, artifactPath: '../.env' },
+    { pipelineId, jobId: 'bad', artifactPath: path },
+    { pipelineId, jobId: id, artifactPath: path, branch: 'development' },
+  ]) assert.throws(() => valid(command('churchpro_report', bad)));
+  const requests = [];
+  const fetcher = async (url, init) => {
+    requests.push({ url, init });
+    if (url.includes('storage.googleapis.com')) {
+      return response({
+        schemaVersion: 1, project: 'churchpro', product: 'ChurchPro',
+        revision, evidenceStatus: 'failed',
+        checks: [
+          { intent: 'real_authorized_roster', status: 'passed' },
+          { intent: 'invalid_transfer', status: 'failed',
+            diagnostic: 'http_e403_g500' },
+        ],
+      });
+    }
+    if (url.endsWith('/pipelines/' + pipelineId)) {
+      return response({ pipeline: { ppl_id: pipelineId, wf_id: workflowId,
+        project_id: projectId, branch_name: CHURCHPRO_SEMAPHORE.branch,
+        commit_sha: revision, state: 'done', result: 'failed' } });
+    }
+    if (url.endsWith('?detailed=true')) {
+      return response({ pipeline: { wf_id: workflowId }, blocks: [{
+        jobs: [{ job_id: id, status: 'finished', result: 'failed' }],
+      }] });
+    }
+    if (url.includes('/artifacts/signed_url')) return response({
+      items: [{ path, url: 'https://storage.googleapis.com/synthetic/qa.json?sig=test' }],
+    });
+    if (url.includes('/artifacts?')) return response({ artifacts: [
+      { path, is_directory: false, size: 200 },
+    ] });
+    throw Error('Unexpected URL');
+  };
+  const out = await execute(command('churchpro_report', {
+    pipelineId, jobId: id, artifactPath: path,
+  }), fetcher);
+  assert.equal(out.project, 'churchpro');
+  assert.equal(out.revision, revision);
+  assert.equal(out.type, 'qa-intel-api');
+  assert.equal(out.total, 2);
+  assert.equal(out.passed, 1);
+  assert.deepEqual(out.failed, [{ intent: 'invalid_transfer', status: 'failed',
+    diagnostic: 'http_e403_g500' }]);
+  assert.equal(JSON.stringify(out).includes('sig=test'), false);
+  assert.equal(JSON.stringify(out).includes(env.SEMAPHORE_TOKEN), false);
+  assert.equal(requests.at(-1).init.headers.Authorization, undefined);
+
+  const denied = [];
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId, jobId: id, artifactPath: path,
+  }), async (url) => {
+    denied.push(url);
+    return response({ pipeline: { ppl_id: pipelineId, wf_id: workflowId,
+      project_id: otherProjectId, branch_name: CHURCHPRO_SEMAPHORE.branch,
+      commit_sha: revision } });
+  }), /ownership mismatch/);
+  assert.equal(denied.length, 1);
+});
+
+test('ChurchPro report reader rejects unsigned and foreign artifact locations', async () => {
+  const path = 'qa-intel/churchpro/gather-browser-handoff.json';
+  const fetcher = async (url) => {
+    if (url.endsWith('/pipelines/' + pipelineId)) return response({
+      pipeline: { ppl_id: pipelineId, wf_id: workflowId,
+        project_id: projectId, branch_name: CHURCHPRO_SEMAPHORE.branch,
+        commit_sha: revision },
+    });
+    if (url.endsWith('?detailed=true')) return response({
+      pipeline: { wf_id: workflowId }, blocks: [{ jobs: [
+        { job_id: id, status: 'finished', result: 'failed' },
+      ] }],
+    });
+    if (url.includes('/artifacts/signed_url')) return response({ items: [
+      { path, url: 'https://unsafe.example.invalid/path' },
+    ] });
+    if (url.includes('/artifacts?')) return response({ artifacts: [
+      { path, is_directory: false, size: 90 },
+    ] });
+    throw Error('unexpected');
+  };
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId, jobId: id, artifactPath: path,
+  }), fetcher), /Invalid artifact location/);
+});
+
 test('missing credentials and malformed upstream replies fail closed without leaking secrets', async () => {
   const cmd = command('trigger', {
     branch: CHURCHPRO_SEMAPHORE.branch, commitSha: revision, mode: 'validation',
