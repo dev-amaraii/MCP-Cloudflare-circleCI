@@ -145,6 +145,45 @@ test('inspect requires a pipeline belonging to the ChurchPro project and branch'
 });
 
 
+test('inspect returns bounded Jest failure names without exposing credentials or raw log output', async () => {
+  const basic = { pipeline: {
+    ppl_id: pipelineId, wf_id: workflowId,
+    project_id: projectId, branch_name: CHURCHPRO_SEMAPHORE.branch,
+    state: 'done', result: 'failed', commit_sha: revision,
+  } };
+  const detailed = {
+    ...basic,
+    blocks: [{ name: 'Disposable PostgreSQL and agent QA', state: 'done', result: 'failed',
+      jobs: [{ job_id: id, name: 'Database, authenticated API and strict QA-Intel',
+        status: 'finished', result: 'failed' }] }],
+  };
+  let count = 0;
+  const out = await execute(command('inspect', { pipelineId }), async () => {
+    count++;
+    if (count === 1) return response(basic);
+    if (count === 2) return response(detailed);
+    return response({ events: [
+      { event: 'cmd_started', directive: 'corepack pnpm --filter "@churchpro/api" test' },
+      { event: 'cmd_output', output: [
+        '● Phase 2 Department API: current permissions › requires branch affiliation',
+        'Expected: 404',
+        'Received: 409',
+        'API_KEY: do-not-disclose',
+        'https://private.example.invalid/secret',
+        'Tests:       2 failed, 141 passed, 143 total',
+      ].join('\\n') },
+      { event: 'cmd_finished', exit_code: 1 },
+    ] });
+  });
+  assert.equal(out.failure.failedTestCases.length, 1);
+  assert.match(out.failure.failedTestCases[0], /requires branch affiliation/);
+  assert.ok(out.failure.diagnosticLines.some(line => line.includes('Expected: 404')));
+  assert.ok(out.failure.diagnosticLines.some(line => line.includes('Received: 409')));
+  assert.equal(JSON.stringify(out).includes('do-not-disclose'), false);
+  assert.equal(JSON.stringify(out).includes('private.example.invalid'), false);
+  assert.equal(JSON.stringify(out).includes(env.SEMAPHORE_TOKEN), false);
+});
+
 test('ChurchPro artifact report reads only owned exact-revision sanitized QA summaries', async () => {
   const path = 'qa-intel/churchpro/agent-handoff.json';
   const stored = 'agent-handoff.json';
