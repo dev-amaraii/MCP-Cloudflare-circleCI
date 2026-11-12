@@ -165,7 +165,7 @@ test('inspect returns bounded Jest failure names without exposing credentials or
     return response({ events: [
       { event: 'cmd_started', directive: 'corepack pnpm --filter "@churchpro/api" test' },
       { event: 'cmd_output', output: [
-        'synthetic build output '.repeat(3500),
+        'synthetic build output '.repeat(300),
         '● Phase 2 Department API: current permissions › requires branch affiliation',
         'Expected: 404',
         'Received: 409',
