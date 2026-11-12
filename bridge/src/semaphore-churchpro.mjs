@@ -269,6 +269,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       { scope: 'jobs', scopeId: command.jobId, path: '' },
       { scope: 'jobs', scopeId: command.jobId, path: 'qa-intel' },
       { scope: 'jobs', scopeId: command.jobId, path: 'qa-intel/churchpro' },
+      { scope: 'jobs', scopeId: command.jobId, path: 'visual-review' },
       { scope: 'workflows', scopeId: pipeline.wf_id, path: '' },
     ];
     const artifacts = [];
@@ -347,19 +348,19 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     const job = jobs.find(item => item?.job_id === command.jobId);
     if (!job) throw Error('ChurchPro QA job ownership mismatch');
     const scope = '?scope=jobs&scope_id=' + command.jobId;
-    // The artifacts list endpoint enumerates directory children, not a file path.
-    const listing = await semaphoreRequest(env, '/artifacts' + scope +
-      '&path=' + encodeURIComponent('qa-intel/churchpro'),
+    // Semaphore's artifact push job stores the basename at the job root.
+    const actualPath = command.artifactPath.slice('qa-intel/churchpro/'.length);
+    const listing = await semaphoreRequest(env, '/artifacts' + scope,
       undefined, requestFn);
     const record = (Array.isArray(listing.artifacts) ? listing.artifacts : [])
-      .find(entry => entry.path === command.artifactPath && entry.is_directory === false);
+      .find(entry => entry.path === actualPath && entry.is_directory === false);
     if (!record || (Number.isInteger(record.size) &&
         (record.size < 0 || record.size > REPORT_MAX_BYTES))) throw Error('QA artifact unavailable');
     const result = await semaphoreRequest(env, '/artifacts/signed_url' + scope +
-      '&path=' + encodeURIComponent(command.artifactPath) + '&method=GET',
+      '&path=' + encodeURIComponent(actualPath) + '&method=GET',
       undefined, requestFn);
     const signed = (Array.isArray(result.items) ? result.items : [])
-      .find(item => item.path === command.artifactPath && typeof item.url === 'string');
+      .find(item => item.path === actualPath && typeof item.url === 'string');
     if (!signed) throw Error('QA artifact unavailable');
     const data = await downloadSanitizedReport(signed.url, requestFn);
     return {
