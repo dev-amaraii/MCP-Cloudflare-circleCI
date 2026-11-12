@@ -862,6 +862,13 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
       'ChurchPro QA job ownership mismatch', 'QA artifact unavailable',
       'Invalid artifact location', 'Invalid sanitized QA report', 'Report too large',
       'QA report source mismatch', 'Browser report source mismatch',
+      'ChurchPro artifact probe not permitted', 'ChurchPro artifact probe ownership mismatch',
+      'ChurchPro PNG access not permitted', 'ChurchPro PNG ownership mismatch',
+      'ChurchPro PNG job ownership mismatch', 'ChurchPro PNG artifact unavailable',
+      'ChurchPro PNG signature unavailable', 'ChurchPro PNG provenance mismatch',
+      'ChurchPro PNG download failed', 'ChurchPro PNG too large',
+      'ChurchPro PNG format mismatch', 'ChurchPro PNG dimensions invalid',
+      'ChurchPro PNG redirect limit',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
