@@ -171,7 +171,7 @@ test('inspect returns bounded Jest failure names without exposing credentials or
         'API_KEY: do-not-disclose',
         'https://private.example.invalid/secret',
         'Tests:       2 failed, 141 passed, 143 total',
-      ].join('\\n') },
+      ].join('\n') },
       { event: 'cmd_finished', exit_code: 1 },
     ] });
   });
