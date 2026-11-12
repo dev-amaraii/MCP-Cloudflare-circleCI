@@ -274,3 +274,63 @@ test('ChurchPro inspection never asks for logs of foreign project or branch', as
   assert.deepEqual(calls, ['https://amaraii.semaphoreci.com' + endpoint]);
 });
 
+test('ChurchPro probe reads only owned job/workflow directories and summarizes upload status', async () => {
+  const probe = command('churchpro_artifact_probe', { pipelineId, jobId: id });
+  assert.equal(valid(probe).project, PROJECTS.churchpro);
+  for (const patch of [
+    { pipelineId, jobId: id, artifactPath: 'qa-intel/churchpro/private.json' },
+    { pipelineId, jobId: 'not-a-uuid' },
+    { pipelineId, jobId: id, branch: 'main' },
+  ]) assert.throws(() => valid(command('churchpro_artifact_probe', patch)));
+  const calls = [];
+  const request = async (url) => {
+    calls.push(url);
+    if (url.endsWith('/pipelines/' + pipelineId)) return response({
+      pipeline: { ppl_id: pipelineId, wf_id: workflowId,
+        project_id: projectId, branch_name: CHURCHPRO_SEMAPHORE.branch, commit_sha: revision },
+    });
+    if (url.endsWith('?detailed=true')) return response({
+      pipeline: { wf_id: workflowId },
+      blocks: [{ jobs: [{ job_id: id, status: 'finished', result: 'passed' }] }],
+    });
+    if (url.includes('/logs/')) return response({ events: [
+      { event: 'cmd_started', directive: 'artifact push job qa-intel/churchpro/visual-review' },
+      { event: 'cmd_finished', exit_code: 0 },
+    ] });
+    if (url.includes('/artifacts?')) {
+      if (url.includes('path=qa-intel%2Fchurchpro')) return response({ artifacts: [
+        { name: 'manifest.json', path: 'qa-intel/churchpro/manifest.json', is_directory: false },
+        { name: 'secret-token.txt', path: 'qa-intel/churchpro/secret-token.txt', is_directory: false },
+      ] });
+      if (url.includes('path=qa-intel')) return response({ artifacts: [
+        { name: 'churchpro', path: 'qa-intel/churchpro', is_directory: true },
+      ] });
+      return response({ artifacts: [{ name: 'qa-intel', path: 'qa-intel', is_directory: true }] });
+    }
+    throw Error('Unexpected endpoint');
+  };
+  const output = await execute(probe, request);
+  assert.equal(output.project, 'churchpro');
+  assert.equal(output.revision, revision);
+  assert.equal(output.artifacts.length, 4);
+  assert.equal(output.artifacts[2].entries[0].file, 'manifest.json');
+  assert.equal(output.artifacts[2].entries[1].file, '(other)');
+  assert.equal(output.upload.commandSeen, true);
+  assert.equal(output.upload.finished, true);
+  assert.equal(output.upload.failed, false);
+  assert.equal(JSON.stringify(output).includes('secret-token'), false);
+  assert.equal(JSON.stringify(output).includes(env.SEMAPHORE_TOKEN), false);
+  assert.equal(calls.filter(u => u.includes('/artifacts?')).length, 4);
+});
+
+test('ChurchPro probe rejects foreign pipeline before any job/log/artifact access', async () => {
+  const calls = [];
+  const cmd = command('churchpro_artifact_probe', { pipelineId, jobId: id });
+  await assert.rejects(execute(cmd, async (url) => {
+    calls.push(url);
+    return response({ pipeline: { ppl_id: pipelineId, project_id: otherProjectId,
+      branch_name: CHURCHPRO_SEMAPHORE.branch, wf_id: workflowId,
+      commit_sha: revision } });
+  }), /ownership mismatch/);
+  assert.equal(calls.length, 1);
+});
