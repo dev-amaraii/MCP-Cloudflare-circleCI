@@ -69,7 +69,7 @@ test('health uses distinct NEN binding without network access or secret disclosu
   const result=await executeCommand(env,command('health'),valid(command('health')).project,()=>{throw Error('No network')});
   assert.equal(result.project,'nen-website-cms');assert.equal(result.projectConfigured,true);
   assert.equal(result.releasePermitted,false);assert.equal(result.triggerPermitted,true);
-  assert.equal(result.triggerScope,'single-reviewed-branch-and-exact-sha');
+  assert.equal(result.triggerScope,'reviewed-branch-and-exact-sha-allowlist');
   assert.ok(!JSON.stringify(result).includes(env.SEMAPHORE_TOKEN));
 });
 test('cross-project pipeline cannot access details or logs',async()=>{
