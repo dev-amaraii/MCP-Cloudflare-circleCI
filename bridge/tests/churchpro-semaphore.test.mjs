@@ -62,7 +62,7 @@ test('health reports only ChurchPro binding readiness, never a token or project 
   assert.equal(result.projectConfigured, true);
   assert.equal(result.tokenConfigured, true);
   assert.deepEqual(result.allowedBranches, [CHURCHPRO_SEMAPHORE.branch]);
-  assert.deepEqual(result.allowedActions, ['health', 'trigger', 'inspect']);
+  assert.deepEqual(result.allowedActions, ['health', 'trigger', 'inspect', 'churchpro_report', 'churchpro_artifact_probe', 'churchpro_png']);
   assert.equal(JSON.stringify(result).includes(projectId), false);
   assert.equal(JSON.stringify(result).includes(env.SEMAPHORE_TOKEN), false);
   const missing = await execute(command('health'), () => { throw Error('no network'); }, {});
@@ -313,7 +313,7 @@ test('ChurchPro probe reads only owned job/workflow directories and summarizes u
   const output = await execute(probe, request);
   assert.equal(output.project, 'churchpro');
   assert.equal(output.revision, revision);
-  assert.equal(output.artifacts.length, 4);
+  assert.equal(output.artifacts.length, 5);
   assert.equal(output.artifacts[2].entries[0].file, 'manifest.json');
   assert.equal(output.artifacts[2].entries[1].file, '(other)');
   assert.equal(output.upload.commandSeen, true);
@@ -321,7 +321,7 @@ test('ChurchPro probe reads only owned job/workflow directories and summarizes u
   assert.equal(output.upload.failed, false);
   assert.equal(JSON.stringify(output).includes('secret-token'), false);
   assert.equal(JSON.stringify(output).includes(env.SEMAPHORE_TOKEN), false);
-  assert.equal(calls.filter(u => u.includes('/artifacts?')).length, 4);
+  assert.equal(calls.filter(u => u.includes('/artifacts?')).length, 5);
 });
 
 test('ChurchPro probe rejects foreign pipeline before any job/log/artifact access', async () => {
