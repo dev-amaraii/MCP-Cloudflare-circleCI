@@ -345,3 +345,22 @@ test('NEN reviewed PR42 preview stays restricted to its exact branch, SHA, and s
     mocked({bytes:new TextEncoder().encode(JSON.stringify({...sampleReport,base:'https://other-site.example.com'}))}).read),
     /Invalid NEN QA report/);
 });
+
+test('NEN contrast report exposes only bounded numeric failures, never page text or tokens',async()=>{
+  const report={...sampleReport,base:NEN_PREVIEW_42.base,results:[{
+    ...sampleReport.results[0],
+    failures:[
+      'brand panel 0 h1 foreground/background contrast 1:1 below 3:1',
+      'brand panel 1 p foreground/background contrast 2.25:1 below 4.5:1',
+      'brand-panel sections missing from rendered NEN page',
+      'secret page body '+env.SEMAPHORE_TOKEN,
+    ],
+  }]};
+  const {read}=mocked({bytes:new TextEncoder().encode(JSON.stringify(report))});
+  const out=await executeSemaphoreNen(env,command('nen_artifact_report',{pipelineId:pipeline}),read);
+  assert.deepEqual(out.failuresDetail[0].errors,
+    ['brand_panel_text_contrast','brand_panel_text_contrast','brand_panel_missing','other']);
+  assert.deepEqual(out.failuresDetail[0].contrastFailures,
+    [{panel:0,tag:'h1',ratio:1,minimum:3},{panel:1,tag:'p',ratio:2.25,minimum:4.5}]);
+  assert.ok(!JSON.stringify(out).includes(env.SEMAPHORE_TOKEN));
+});
