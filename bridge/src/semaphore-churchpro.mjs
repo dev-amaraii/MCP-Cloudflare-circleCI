@@ -262,8 +262,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     }
     const jobs = (Array.isArray(details.blocks) ? details.blocks : [])
       .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
-    const job = jobs.find(item => item?.job_id === command.jobId &&
-      item.status === 'finished');
+    const job = jobs.find(item => item?.job_id === command.jobId);
     if (!job) throw Error('ChurchPro QA job ownership mismatch');
     const params = '?scope=jobs&scope_id=' + command.jobId +
       '&path=' + encodeURIComponent(command.artifactPath);
