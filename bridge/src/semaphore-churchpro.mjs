@@ -110,8 +110,14 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     }
     const details = await semaphoreRequest(env, '/pipelines/' + command.pipelineId +
       '?detailed=true', undefined, requestFn);
-    const detailed = checkedPipeline(details, id);
-    if (detailed.wf_id && detailed.wf_id !== pipeline.wf_id) {
+    // Semaphore's detailed response may omit repeated project/branch metadata.
+    // The basic response above is mandatory and already establishes ownership.
+    const detailed = details?.pipeline;
+    if (!detailed ||
+        (detailed.project_id && detailed.project_id !== id) ||
+        (detailed.branch_name && detailed.branch_name !== CHURCHPRO_SEMAPHORE.branch) ||
+        (detailed.ppl_id && detailed.ppl_id !== command.pipelineId) ||
+        (detailed.wf_id && detailed.wf_id !== pipeline.wf_id)) {
       throw Error('ChurchPro Semaphore workflow identity mismatch');
     }
     const blocks = (Array.isArray(details.blocks) ? details.blocks : []).slice(0, 12)
