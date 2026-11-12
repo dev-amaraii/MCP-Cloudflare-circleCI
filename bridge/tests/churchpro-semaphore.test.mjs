@@ -111,13 +111,27 @@ test('inspect requires a pipeline belonging to the ChurchPro project and branch'
   };
   const out = await execute(command('inspect', { pipelineId }), async (url, init) => {
     requests.push({ url, init });
-    return response(requests.length === 1 ? basic : detailed);
+    return response(requests.length === 1 ? basic
+      : requests.length === 2 ? detailed : {
+        events: [
+          { event: 'cmd_started', directive: 'corepack pnpm --filter @churchpro/web typecheck' },
+          { event: 'cmd_output', output: 'src/admins/staff.tsx(13,4): error TS2322: Type mismatch.\nAPI_KEY=do-not-disclose\nhttps://private.example.invalid/secret' },
+          { event: 'cmd_finished', exit_code: 1 },
+        ],
+      });
   });
   assert.equal(out.result, 'failed');
   assert.equal(out.vcs.branch, CHURCHPRO_SEMAPHORE.branch);
   assert.equal(out.vcs.revision, revision);
   assert.equal(out.blocks[0].jobs[0].result, 'failed');
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2].url,
+    'https://amaraii.semaphoreci.com/api/v1alpha/logs/' + id);
+  assert.equal(out.failure.exitCode, 1);
+  assert.match(out.failure.command, /pnpm.*typecheck/);
+  assert.match(out.failure.diagnosticLines[0], /TS2322/);
+  assert.equal(JSON.stringify(out).includes('do-not-disclose'), false);
+  assert.equal(JSON.stringify(out).includes('private.example.invalid'), false);
   assert.equal(JSON.stringify(out).includes(env.SEMAPHORE_TOKEN), false);
   const seen = [];
   await assert.rejects(execute(command('inspect', { pipelineId }), async (url) => {
@@ -143,3 +157,23 @@ test('missing credentials and malformed upstream replies fail closed without lea
   await assert.rejects(execute(cmd, async () => response({ workflow_id: 'bad', pipeline_id: pipelineId })),
     /Invalid ChurchPro Semaphore response/);
 });
+
+test('ChurchPro inspection never asks for logs of foreign project or branch', async () => {
+  const endpoint = '/api/v1alpha/pipelines/' + pipelineId;
+  const mismatch = {
+    pipeline: {
+      ppl_id: pipelineId,
+      wf_id: workflowId,
+      project_id: otherProjectId,
+      branch_name: CHURCHPRO_SEMAPHORE.branch,
+      commit_sha: revision,
+    },
+  };
+  const calls = [];
+  await assert.rejects(execute(command('inspect', { pipelineId }), async (url) => {
+    calls.push(url);
+    return response(mismatch);
+  }), /ownership mismatch/);
+  assert.deepEqual(calls, ['https://amaraii.semaphoreci.com' + endpoint]);
+});
+
