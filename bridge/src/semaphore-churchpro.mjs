@@ -93,13 +93,17 @@ function failureSummary(payload) {
     .replace(/\b[A-Za-z0-9+/_=-]{32,}\b/g, '[redacted]')
     .slice(0, 180);
   const lines = lastFailure.output.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
-    .filter(line => /(?:\berror\b|\bwarning\b|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed|BROWSER_CASE_(?:FAIL|DIAGNOSTIC)|QA_INTEL_API|✖)/i.test(line))
+    .filter(line => /(?:\berror\b|\bwarning\b|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed|BROWSER_CASE_(?:FAIL|DIAGNOSTIC)|QA_INTEL_API|✖|^\s*●\s+|\bExpected:|\bReceived:|expected\s+\d{3}|got\s+\d{3}|Test Suites:|Tests:)/i.test(line))
     .filter(line => !/(?:API[_-]?KEY|SECRET|PASSWORD|TOKEN|AUTHORIZATION|PRIVATE[_-]?KEY)\s*[:=]/i.test(line))
-    .slice(-10).map(redact);
+    .slice(-22).map(redact);
+  const failedTestCases = lastFailure.output.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
+    .filter(line => /^\s*●\s+Phase 2 Department API:/i.test(line))
+    .slice(-6).map(redact);
   return {
     command: redact(lastFailure.command),
     exitCode: lastFailure.exitCode,
     diagnosticLines: [...new Set(lines)],
+    ...(failedTestCases.length ? { failedTestCases: [...new Set(failedTestCases)] } : {}),
   };
 }
 
