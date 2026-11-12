@@ -225,7 +225,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
       (command.project === 'amaraii-os' &&
         ['health','trigger','inspect','semaphore_artifacts','semaphore_png'].includes(command.action)) ||
       (command.project === 'churchpro' &&
-        ['health','trigger','inspect'].includes(command.action)) ||
+        ['health','trigger','inspect','churchpro_report'].includes(command.action)) ||
       (command.project === 'nen-website-cms' &&
         ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview'].includes(command.action)))) {
     throw new Error('Semaphore action not permitted');
@@ -379,6 +379,17 @@ export function validateCommand(command, keyId, now = Date.now()) {
       throw new Error('Semaphore artifact listing not permitted');
     }
     return {command,project};
+  }
+  if (command.action === 'churchpro_report') {
+    if (command.project !== 'churchpro' || provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        !['qa-intel/churchpro/agent-handoff.json',
+          'qa-intel/churchpro/gather-browser-handoff.json'].includes(command.artifactPath) ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined) throw Error('ChurchPro report access not permitted');
+    return { command, project };
   }
   if (command.action === 'inspect') {
     if (typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) throw new Error('Invalid pipelineId');
