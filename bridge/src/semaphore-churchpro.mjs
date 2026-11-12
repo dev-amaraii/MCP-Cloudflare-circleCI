@@ -210,7 +210,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       projectConfigured: UUID.test(env.SEMAPHORE_PROJECT_ID_CHURCH_PRO ?? ''),
       allowedBranches: [CHURCHPRO_SEMAPHORE.branch],
       availableModes: ['validation'],
-      allowedActions: ['health', 'trigger', 'inspect', 'churchpro_report'],
+      allowedActions: ['health', 'trigger', 'inspect', 'churchpro_report', 'churchpro_artifact_probe'],
     };
   }
   const id = projectId(env);
@@ -238,6 +238,88 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       pipelineId: response.pipeline_id,
       workflowId: response.workflow_id,
     };
+  }
+  if (command.action === 'churchpro_artifact_probe') {
+    if (!UUID.test(command.pipelineId ?? '') || !UUID.test(command.jobId ?? '')) {
+      throw Error('ChurchPro artifact probe not permitted');
+    }
+    // Verify actual Semaphore pipeline ownership before any job/artifact reads.
+    const basics = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
+      undefined, requestFn);
+    const pipeline = checkedPipeline(basics, id);
+    if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId ||
+        !SHA.test(pipeline.commit_sha ?? '') || !UUID.test(pipeline.wf_id ?? '')) {
+      throw Error('ChurchPro artifact probe ownership mismatch');
+    }
+    const details = await semaphoreRequest(env, '/pipelines/' + command.pipelineId +
+      '?detailed=true', undefined, requestFn);
+    if (!details?.pipeline ||
+        details.pipeline.wf_id && details.pipeline.wf_id !== pipeline.wf_id ||
+        details.pipeline.project_id && details.pipeline.project_id !== id) {
+      throw Error('ChurchPro artifact probe ownership mismatch');
+    }
+    const jobs = (Array.isArray(details.blocks) ? details.blocks : [])
+      .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
+    if (!jobs.some(job => job?.job_id === command.jobId)) {
+      throw Error('ChurchPro artifact probe ownership mismatch');
+    }
+    // Only probe fixed root/prefix paths. Do not return arbitrary filenames,
+    // raw logs, signed URLs, hidden secrets or data from a foreign project.
+    const probes = [
+      { scope: 'jobs', scopeId: command.jobId, path: '' },
+      { scope: 'jobs', scopeId: command.jobId, path: 'qa-intel' },
+      { scope: 'jobs', scopeId: command.jobId, path: 'qa-intel/churchpro' },
+      { scope: 'workflows', scopeId: pipeline.wf_id, path: '' },
+    ];
+    const artifacts = [];
+    for (const probe of probes) {
+      const params = new URLSearchParams({ scope: probe.scope,
+        scope_id: probe.scopeId, ...(probe.path ? { path: probe.path } : {}) });
+      try {
+        const data = await semaphoreRequest(env, '/artifacts?' + params.toString(),
+          undefined, requestFn);
+        const children = Array.isArray(data.artifacts) ? data.artifacts : [];
+        artifacts.push({ scope: probe.scope, path: probe.path || '(root)',
+          http: 200, count: children.length,
+          entries: children.slice(0, 24).map(e => ({
+            file: typeof e?.name === 'string' &&
+              /^(?:qa-intel|churchpro|visual-review|manifest\.json|agent-handoff\.json|gather-browser-handoff\.json|[a-z0-9-]{1,50}\.png)$/u.test(e.name)
+              ? e.name : '(other)',
+            directory: e?.is_directory === true,
+          })) });
+      } catch (error) {
+        const m = /ChurchPro Semaphore API HTTP (\d{3})/u.exec(String(error));
+        artifacts.push({ scope: probe.scope, path: probe.path || '(root)',
+          http: m ? Number(m[1]) : 0 });
+      }
+    }
+    let upload = { commandSeen: false, finished: false, failed: false,
+      reportedCount: 0 };
+    try {
+      const logs = await semaphoreRequest(env, '/logs/' + command.jobId,
+        undefined, requestFn);
+      const events = Array.isArray(logs.events) ? logs.events.slice(-5000) : [];
+      let activeUpload = false;
+      for (const event of events) {
+        if (event?.event === 'cmd_started') {
+          activeUpload = typeof event.directive === 'string' &&
+            /(?:^|\s)artifact\s+push\s+(?:job|workflow)\s/iu.test(event.directive);
+          if (activeUpload) upload.commandSeen = true;
+        } else if (event?.event === 'cmd_finished' && activeUpload) {
+          upload.finished = true;
+          if (event.exit_code !== 0) upload.failed = true;
+          activeUpload = false;
+        } else if (event?.event === 'cmd_output' && activeUpload) {
+          if (typeof event.output === 'string' &&
+              /(?:error|failed|not found|forbidden|unauthorized|upload)/iu.test(event.output)) {
+            upload.reportedCount = Math.min(30, upload.reportedCount + 1);
+          }
+        }
+      }
+    } catch { /* Return root artifact statuses even if logs are unavailable. */ }
+    return { provider: 'semaphore', project: 'churchpro',
+      pipelineId: command.pipelineId, jobId: command.jobId,
+      revision: pipeline.commit_sha, artifacts, upload };
   }
   if (command.action === 'churchpro_report') {
     if (!UUID.test(command.pipelineId ?? '') || !UUID.test(command.jobId ?? '') ||
