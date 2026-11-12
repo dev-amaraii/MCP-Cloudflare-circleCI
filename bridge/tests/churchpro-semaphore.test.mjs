@@ -147,6 +147,7 @@ test('inspect requires a pipeline belonging to the ChurchPro project and branch'
 
 test('ChurchPro artifact report reads only owned exact-revision sanitized QA summaries', async () => {
   const path = 'qa-intel/churchpro/agent-handoff.json';
+  const stored = 'agent-handoff.json';
   assert.equal(valid(command('churchpro_report', { pipelineId, jobId: id, artifactPath: path })).project,
     PROJECTS.churchpro);
   for (const bad of [
@@ -179,10 +180,10 @@ test('ChurchPro artifact report reads only owned exact-revision sanitized QA sum
       }] });
     }
     if (url.includes('/artifacts/signed_url')) return response({
-      items: [{ path, url: 'https://storage.googleapis.com/synthetic/qa.json?sig=test' }],
+      items: [{ path: stored, url: 'https://storage.googleapis.com/synthetic/qa.json?sig=test' }],
     });
     if (url.includes('/artifacts?')) return response({ artifacts: [
-      { path, is_directory: false, size: 200 },
+      { path: stored, is_directory: false, size: 200 },
     ] });
     throw Error('Unexpected URL');
   };
@@ -199,9 +200,8 @@ test('ChurchPro artifact report reads only owned exact-revision sanitized QA sum
   assert.equal(JSON.stringify(out).includes('sig=test'), false);
   assert.equal(JSON.stringify(out).includes(env.SEMAPHORE_TOKEN), false);
   assert.equal(requests.at(-1).init.headers.Authorization, undefined);
-  assert(requests.some(entry => entry.url.includes('/artifacts?') &&
-    entry.url.includes('path=qa-intel%2Fchurchpro')),
-    'Artifact listing must target the directory, not the signed file');
+  assert(requests.some(entry => entry.url.endsWith('/artifacts?scope=jobs&scope_id=' + id)),
+    'Job artifact listing must target the actual Semaphore job root');
 
   const denied = [];
   await assert.rejects(execute(command('churchpro_report', {
@@ -217,6 +217,7 @@ test('ChurchPro artifact report reads only owned exact-revision sanitized QA sum
 
 test('ChurchPro report reader rejects unsigned and foreign artifact locations', async () => {
   const path = 'qa-intel/churchpro/gather-browser-handoff.json';
+  const stored = 'gather-browser-handoff.json';
   const fetcher = async (url) => {
     if (url.endsWith('/pipelines/' + pipelineId)) return response({
       pipeline: { ppl_id: pipelineId, wf_id: workflowId,
@@ -229,10 +230,10 @@ test('ChurchPro report reader rejects unsigned and foreign artifact locations', 
       ] }],
     });
     if (url.includes('/artifacts/signed_url')) return response({ items: [
-      { path, url: 'https://unsafe.example.invalid/path' },
+      { path: stored, url: 'https://unsafe.example.invalid/path' },
     ] });
     if (url.includes('/artifacts?')) return response({ artifacts: [
-      { path, is_directory: false, size: 90 },
+      { path: stored, is_directory: false, size: 90 },
     ] });
     throw Error('unexpected');
   };
@@ -333,4 +334,29 @@ test('ChurchPro probe rejects foreign pipeline before any job/log/artifact acces
       commit_sha: revision } });
   }), /ownership mismatch/);
   assert.equal(calls.length, 1);
+});
+
+test('ChurchPro visual PNG reads are restricted to synthetic review filenames', async () => {
+  const validPath = 'visual-review/staff-1280.png';
+  assert.equal(valid(command('churchpro_png', {
+    pipelineId, jobId: id, artifactPath: validPath,
+  })).project, PROJECTS.churchpro);
+  for (const path of [
+    'visual-review/../../.env', 'visual-review/manifest.json',
+    'visual-review/private.png', 'staff-1280.png', '/visual-review/staff-1280.png',
+  ]) {
+    assert.throws(() => valid(command('churchpro_png', {
+      pipelineId, jobId: id, artifactPath: path,
+    })));
+  }
+  const requests = [];
+  await assert.rejects(execute(command('churchpro_png', {
+    pipelineId, jobId: id, artifactPath: validPath,
+  }), async url => {
+    requests.push(url);
+    return response({ pipeline: { project_id: otherProjectId,
+      branch_name: CHURCHPRO_SEMAPHORE.branch,
+      ppl_id: pipelineId, wf_id: workflowId, commit_sha: revision } });
+  }), /ownership mismatch/);
+  assert.equal(requests.length, 1, 'Foreign project must not leak images or artifact paths');
 });
