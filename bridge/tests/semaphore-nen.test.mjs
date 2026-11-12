@@ -315,7 +315,7 @@ test('NEN preview detail exposes only fixed preflight categories',async()=>{
 test('NEN reviewed PR42 preview stays restricted to its exact branch, SHA, and staging origin', async()=>{
   assert.equal(NEN_APPROVED_PREVIEWS.length,2);
   assert.equal(NEN_PREVIEW_42.branch,'fix/nen-brand-panel-fallback-20261112');
-  assert.equal(NEN_PREVIEW_42.commitSha,'31d52bdacfe2e69844e7f73d153992480cb8a36f');
+  assert.equal(NEN_PREVIEW_42.commitSha,'37c9cf48f115ae070177275f790dffba93846531');
   assert.equal(NEN_PREVIEW_42.base,'https://nen-website-cms-staging-git-fix-nen-brand-p-8580eb-amaraii-team.vercel.app');
   const c=command('nen_trigger_preview',{branch:NEN_PREVIEW_42.branch,
     commitSha:NEN_PREVIEW_42.commitSha,mode:'validation'});
