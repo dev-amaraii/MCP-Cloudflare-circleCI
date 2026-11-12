@@ -76,7 +76,7 @@ function failureSummary(payload) {
         output: '',
       };
     } else if (event.event === 'cmd_output' && current && typeof event.output === 'string') {
-      current.output = (current.output + event.output.slice(0, 2000)).slice(-16000);
+      current.output = (current.output + event.output.slice(0, 50000)).slice(-120000);
     } else if (event.event === 'cmd_finished' && current) {
       if (Number.isInteger(event.exit_code) && event.exit_code !== 0) {
         lastFailure = { ...current, exitCode: event.exit_code };
