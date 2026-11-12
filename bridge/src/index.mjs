@@ -9,7 +9,7 @@
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
 import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-churchpro.mjs';
-import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_PREVIEW } from './semaphore-nen.mjs';
+import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_APPROVED_PREVIEWS } from './semaphore-nen.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -231,10 +231,11 @@ export function validateCommand(command, keyId, now = Date.now()) {
     throw new Error('Semaphore action not permitted');
   }
   if (command.project === 'nen-website-cms') {
-    // NEN CI can only trigger the reviewed PR #40 SHA, never arbitrary
+    // NEN CI can only trigger explicitly reviewed PR #40/42 SHA pairs, never arbitrary
     // branches, pipeline files, releases, or application deployments.
     if (command.action === 'nen_trigger_preview') {
-      if (command.branch !== NEN_PREVIEW.branch || command.commitSha !== NEN_PREVIEW.commitSha ||
+      if (!NEN_APPROVED_PREVIEWS.some((p) =>
+            command.branch === p.branch && command.commitSha === p.commitSha) ||
           command.mode !== 'validation' || command.pipelineId !== undefined ||
           command.jobId !== undefined || command.artifactPath !== undefined ||
           command.startNumber !== undefined || command.jobNumber !== undefined) {
