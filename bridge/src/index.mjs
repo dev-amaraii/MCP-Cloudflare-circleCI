@@ -835,12 +835,17 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
       'Invalid release revision', 'Release command has unexpected fields', 'Invalid job number', 'Job inspection has unexpected fields', 'Job project mismatch',
       'Invalid job identity', 'Job steps have unexpected fields', 'Job does not belong to approved pipeline', 'Job identity mismatch',
       'Semaphore artifact listing not permitted', 'Semaphore artifact preview not permitted', 'Semaphore QA artifact access not permitted', 'Artifact preview not permitted', 'Artifact not found', 'Artifact too large', 'Artifact format not supported', 'Artifact download failed', 'Unsafe artifact URL',
+      'ChurchPro report access not permitted', 'ChurchPro pipeline identity mismatch',
+      'ChurchPro source identity missing', 'ChurchPro workflow identity mismatch',
+      'ChurchPro QA job ownership mismatch', 'QA artifact unavailable',
+      'Invalid artifact location', 'Invalid sanitized QA report', 'Report too large',
+      'QA report source mismatch', 'Browser report source mismatch',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
     const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ||
       /^Unsafe artifact URL: [a-z0-9.-]{1,253}$/.test(message) ||
-      (/^Semaphore API HTTP [0-9]{3}$/.test(message) || /^NEN Semaphore API HTTP [0-9]{3}$/.test(message)) ? message
+      (/^Semaphore API HTTP [0-9]{3}$/.test(message) || /^NEN Semaphore API HTTP [0-9]{3}$/.test(message) || /^ChurchPro Semaphore API HTTP [0-9]{3}$/.test(message)) ? message
       : err instanceof SyntaxError ? 'Invalid JSON response or command'
       : /^CircleCI v3 HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof TypeError ? 'Network or API transport failure'
