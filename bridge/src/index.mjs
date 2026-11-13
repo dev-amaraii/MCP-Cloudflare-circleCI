@@ -276,6 +276,11 @@ export function validateCommand(command, keyId, now = Date.now()) {
           command.commitSha !== '43690eef91cf5fa1e35bee7257312c2cb2586f48') {
         throw new Error('PR109 validation revision not permitted');
       }
+      if (command.project === 'amaraii-os' &&
+          command.branch === 'feat/gym-historical-reconciliation-integration-20261113' &&
+          command.commitSha !== 'd07249343308bb0b2847058d0435ec84fccbedb8') {
+        throw new Error('PR110 validation revision not permitted');
+      }
     } else if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) {
       throw new Error('Pipeline mode not permitted');
     }
