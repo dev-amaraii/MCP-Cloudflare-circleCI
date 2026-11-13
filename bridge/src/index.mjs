@@ -386,7 +386,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
         typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
         typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
         typeof command.artifactPath !== 'string' ||
-        !/^visual-review\/(?:people-390|navigation-390|cells-390|church-1280|people-1280|people-320|church-768|cells-1440|people-dark-1280|person-detail-390|cell-roster-390|staff-1280|staff-removed-1280)\.png$/u.test(command.artifactPath) ||
+        !/^visual-review\/(?:people-390|navigation-390|cells-390|church-1280|people-1280|people-320|church-768|cells-1440|people-dark-1280|person-detail-390|cell-roster-390|staff-1280|staff-removed-1280|g4-requester-390|g4-review-1280|g4b-contact-hidden-390|g4b-duplicate-hidden-1280)\.png$/u.test(command.artifactPath) ||
         command.branch !== undefined || command.mode !== undefined ||
         command.commitSha !== undefined || command.startNumber !== undefined ||
         command.jobNumber !== undefined) throw Error('ChurchPro PNG access not permitted');
