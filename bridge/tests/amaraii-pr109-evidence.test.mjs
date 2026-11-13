@@ -203,7 +203,7 @@ test("Queue validator accepts only reviewed, bounded PR109 command shapes",()=>{
 test("PR110 integration validation cannot trigger for another revision or project",async()=>{
  const id="66666666-6666-4666-8666-666666666666",now=Date.now();
  const branch="feat/gym-historical-reconciliation-integration-20261113";
- const commitSha="1578fd7b19cd91b36207a0667923ef0e8fd8fdd3";
+ const commitSha="712cd7c414ae332f3cfbc026ca699567920f0994";
  const command={v:1,id,action:"trigger",project:"amaraii-os",provider:"semaphore",
    branch,commitSha,mode:"validation",approved:true,requestedAt:new Date(now).toISOString()};
  assert.doesNotThrow(()=>validateCommand(command,id,now));
