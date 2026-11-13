@@ -405,6 +405,7 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
   const branch = 'codex/churchpro-phase2-departments-foundation-20261112';
   const branchOperations = 'codex/churchpro-phase2-department-operations-20261112';
   const branchConversion = 'codex/churchpro-p2-3h-classification-policy-20261113';
+  const branchPrivate = 'codex/churchpro-p2-g1-private-profile-20261113';
   assert.throws(() => valid(command('trigger', {
     branch, commitSha: revision, mode: 'validation',
   })), /Branch not permitted/);
@@ -462,6 +463,19 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
     });
   });
   assert.equal(conversion.vcs.branch, branchConversion);
+  const privatePipeline = { pipeline: { ...basic.pipeline, branch_name: branchPrivate } };
+  const requestsPrivate = [];
+  const privateInspection = await execute(command('inspect', { pipelineId }), async url => {
+    requestsPrivate.push(url);
+    return response(requestsPrivate.length === 1 ? privatePipeline : {
+      pipeline: privatePipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(privateInspection.vcs.branch, branchPrivate);
+  assert.equal(requestsPrivate.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: branchPrivate, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
   assert.equal(validConversion.length, 2);
   assert.throws(() => valid(command('trigger', {
     branch: branchConversion, commitSha: revision, mode: 'validation',
