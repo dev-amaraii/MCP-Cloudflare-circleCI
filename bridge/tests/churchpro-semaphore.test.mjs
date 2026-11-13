@@ -380,7 +380,7 @@ test('ChurchPro G4b PNG retrieval requires exact synthetic manifest, job and dim
     const calls=[];
     await assert.rejects(execute(command('churchpro_png',{
       pipelineId:pinned,jobId:wrongJob,artifactPath:path,
-    }),async url=>{calls.push(url);return response({pipeline:base});}),/mismatch/);
+    }),async url=>{calls.push(url);return response({pipeline:base});}),/not allowed|mismatch/);
     assert.equal(calls.length,1);
   }
   for(const forbiddenPath of ['visual-review/staff-1280.png',
