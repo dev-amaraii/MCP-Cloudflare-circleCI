@@ -17,11 +17,13 @@ const API = "https://amaraii.semaphoreci.com/api/v1alpha";
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const MAX_IMAGE = 1600000;
 const MAX_REPORT = 131072;
+const MAX_QA_RUN = 400000;
 const DIRS = new Set([
   "historical-service",
   "historical-service/screenshots",
   "historical-service/qa-intel",
   "historical-service/qa-intel/screenshots",
+  "historical-service/qa-intel/artifacts",
 ]);
 const STATIC_IMAGES = /^historical-service\/screenshots\/historical-service-(?:320|390|1280|invalid-390)\.png$/;
 const QA_IMAGES = /^historical-service\/qa-intel\/(?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_-]{1,110}\.png$/;
@@ -31,6 +33,7 @@ const REPORTS = new Set([
   "historical-service/qa-intel/report.md",
   "historical-service/qa-intel/report.json",
   "historical-service/qa-intel/summary.json",
+  "historical-service/qa-intel/run.json",
 ]);
 const ALLOWED_HOSTS = host =>
   host === "storage.googleapis.com" ||
@@ -214,10 +217,11 @@ export async function executePr109Evidence(env,command,fetchFn=fetch){
   if (!REPORTS.has(path)) throw Error("Report path not permitted");
   const entries=await list(env,ownership.jobId,path.slice(0,path.lastIndexOf("/")),fetchFn);
   const found=entries.find(x=>x.path===path&&!x.directory);
-  if (!found || found.size !== null && found.size > MAX_REPORT)
+  const reportLimit=path === "historical-service/qa-intel/run.json" ? MAX_QA_RUN : MAX_REPORT;
+  if (!found || found.size !== null && found.size > reportLimit)
     throw Error("PR109 report not found or too large");
   const data=await retrieve(await signed(env,ownership.jobId,path,fetchFn),
-    MAX_REPORT,["text/plain","text/markdown","application/json"],fetchFn);
+    reportLimit,["text/plain","text/markdown","application/json"],fetchFn);
   const report = new TextDecoder("utf-8",{fatal:true}).decode(data.bytes);
   if (!report.trim()) throw Error("Empty PR109 report");
   return {...ownership,action:command.action,path,mediaType:"text/plain",
