@@ -404,6 +404,7 @@ test('ChurchPro visual PNG reads are restricted to synthetic review filenames', 
 test('department PR #20 is read-only inspectable without expanding triggers, artifacts or foreign-project access', async () => {
   const branch = 'codex/churchpro-phase2-departments-foundation-20261112';
   const branchOperations = 'codex/churchpro-phase2-department-operations-20261112';
+  const branchConversion = 'codex/churchpro-p2-3h-classification-policy-20261113';
   assert.throws(() => valid(command('trigger', {
     branch, commitSha: revision, mode: 'validation',
   })), /Branch not permitted/);
@@ -452,6 +453,20 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
     return response({ pipeline: departmentOperationsPipeline.pipeline, blocks: [] });
   });
   assert.equal(operations.vcs.branch, branchOperations);
+  const conversionPipeline = { pipeline: { ...basic.pipeline, branch_name: branchConversion } };
+  const validConversion = [];
+  const conversion = await execute(command('inspect', { pipelineId }), async url => {
+    validConversion.push(url);
+    return response(validConversion.length === 1 ? conversionPipeline : {
+      pipeline: conversionPipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(conversion.vcs.branch, branchConversion);
+  assert.equal(validConversion.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: branchConversion, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+
   assert.equal(validOperations.length, 2);
   assert.throws(() => valid(command('trigger', {
     branch: branchOperations, commitSha: revision, mode: 'validation',
