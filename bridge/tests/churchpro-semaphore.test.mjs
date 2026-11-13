@@ -483,6 +483,24 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
   });
   assert.equal(reviewInspection.vcs.branch, branchDuplicateReview);
   assert.equal(reviewRequests.length, 2);
+  const g3Branch = 'codex/churchpro-p2-g3-protected-person-lifecycle-20261113';
+  const g3Pipeline = { pipeline: { ...basic.pipeline, branch_name: g3Branch } };
+  const g3Requests = [];
+  const g3Inspection = await execute(command('inspect', { pipelineId }), async url => {
+    g3Requests.push(url);
+    return response(g3Requests.length === 1 ? g3Pipeline : {
+      pipeline: g3Pipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(g3Inspection.vcs.branch, g3Branch);
+  assert.equal(g3Requests.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: g3Branch, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId, jobId: id,
+  }), async () => response(g3Pipeline)), /ownership mismatch/);
+
   assert.throws(() => valid(command('trigger', {
     branch: branchDuplicateReview, commitSha: revision, mode: 'validation',
   })), /Branch not permitted/);
