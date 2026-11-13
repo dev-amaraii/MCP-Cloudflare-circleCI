@@ -59,6 +59,8 @@ const CHURCHPRO_INSPECT_ONLY_BRANCHES = Object.freeze([
   'codex/churchpro-p2-g3-protected-person-lifecycle-20261113',
   // G4a Gather lifecycle UI: inspect same-project CI only, never trigger or retrieve artifacts.
   'codex/churchpro-p2-g4a-person-lifecycle-ui-20261113',
+  // G4b protected People fields/duplicate UI: inspect-only, no triggers or artifacts.
+  'codex/churchpro-p2-g4b-private-profile-duplicate-ui-20261113',
 ]);
 function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
