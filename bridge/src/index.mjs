@@ -230,8 +230,18 @@ export function validateCommand(command, keyId, now = Date.now()) {
           ? command.artifactPath !== undefined &&
               !['historical-service','historical-service/screenshots',
                 'historical-service/qa-intel','historical-service/qa-intel/screenshots'].includes(command.artifactPath)
-          : command.action !== 'pr109_discover' && (
-              typeof command.artifactPath !== 'string' || command.artifactPath.length > 240))) {
+          : command.action === 'pr109_png' ? (
+              typeof command.artifactPath !== 'string' ||
+              command.artifactPath.length > 240 ||
+              !(/^historical-service\\/screenshots\\/historical-service-(?:320|390|1280|invalid-390)\\.png$/.test(command.artifactPath) ||
+                /^historical-service\\/qa-intel\\/(?:[A-Za-z0-9_-]{1,64}\\/){0,3}[A-Za-z0-9_-]{1,110}\\.png$/.test(command.artifactPath))
+            ) : command.action === 'pr109_report' ? ![
+                'historical-service/REPORT.md',
+                'historical-service/qa-intel/REPORT.md',
+                'historical-service/qa-intel/report.md',
+                'historical-service/qa-intel/report.json',
+                'historical-service/qa-intel/summary.json',
+              ].includes(command.artifactPath) : false)) {
       throw new Error('PR109 read-only artifact access not permitted');
     }
     return {command,project};
