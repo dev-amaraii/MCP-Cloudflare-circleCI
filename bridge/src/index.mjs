@@ -233,8 +233,8 @@ export function validateCommand(command, keyId, now = Date.now()) {
           : command.action === 'pr109_png' ? (
               typeof command.artifactPath !== 'string' ||
               command.artifactPath.length > 240 ||
-              !(/^historical-service\\/screenshots\\/historical-service-(?:320|390|1280|invalid-390)\\.png$/.test(command.artifactPath) ||
-                /^historical-service\\/qa-intel\\/(?:[A-Za-z0-9_-]{1,64}\\/){0,3}[A-Za-z0-9_-]{1,110}\\.png$/.test(command.artifactPath))
+              !(/^historical-service\/screenshots\/historical-service-(?:320|390|1280|invalid-390)\.png$/.test(command.artifactPath) ||
+                /^historical-service\/qa-intel\/(?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_-]{1,110}\.png$/.test(command.artifactPath))
             ) : command.action === 'pr109_report' ? ![
                 'historical-service/REPORT.md',
                 'historical-service/qa-intel/REPORT.md',
