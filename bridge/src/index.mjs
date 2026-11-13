@@ -7,8 +7,9 @@
  * Approved release requests only trigger a separate SHA-pinned CircleCI
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
-import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import { executeSemaphore, SEMAPHORE_BRANCHES, PR110_DIAGNOSTIC } from './semaphore.mjs';
 import { selectProvider } from './provider-routing.mjs';
+import { executePr109Evidence } from './amaraii-pr109-evidence.mjs';
 
 const API = 'https://circleci.com/api/v2';
 const PREFIX = 'requests/';
@@ -213,8 +214,51 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
   if (provider === 'semaphore' &&
-      (command.project !== 'amaraii-os' || !['health','trigger','inspect'].includes(command.action))) {
+      (command.project !== 'amaraii-os' || !['health','trigger','inspect','pr110_diagnostics','pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action))) {
     throw new Error('Semaphore action not permitted');
+  }
+  // Exact, project/commit/job-locked synthetic CI metadata only.
+  if (command.action === 'pr110_diagnostics') {
+    if (provider !== 'semaphore' || command.project !== 'amaraii-os' ||
+        command.pipelineId !== PR110_DIAGNOSTIC.pipelineId ||
+        command.jobId !== PR110_DIAGNOSTIC.jobId ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined || command.artifactPath !== undefined) {
+      throw new Error('PR110 diagnostic request not permitted');
+    }
+    return {command,project};
+  }
+  // Exact-commit, read-only historical PT artifacts. No trigger or arbitrary URL.
+  if (['pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action)) {
+    if (provider !== 'semaphore' || command.project !== 'amaraii-os' ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.jobId !== undefined ||
+        command.jobNumber !== undefined || command.startNumber !== undefined ||
+        (command.action === 'pr109_discover'
+          ? command.pipelineId !== undefined || command.artifactPath !== undefined
+          : typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) ||
+        (command.action === 'pr109_artifacts'
+          ? command.artifactPath !== undefined &&
+              !['historical-service','historical-service/screenshots',
+                'historical-service/qa-intel','historical-service/qa-intel/screenshots',
+                'historical-service/qa-intel/artifacts'].includes(command.artifactPath)
+          : command.action === 'pr109_png' ? (
+              typeof command.artifactPath !== 'string' ||
+              command.artifactPath.length > 240 ||
+              !(/^historical-service\/screenshots\/historical-service-(?:320|390|1280|invalid-390)\.png$/.test(command.artifactPath) ||
+                /^historical-service\/qa-intel\/(?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_-]{1,110}\.png$/.test(command.artifactPath))
+            ) : command.action === 'pr109_report' ? ![
+                'historical-service/REPORT.md',
+                'historical-service/qa-intel/REPORT.md',
+                'historical-service/qa-intel/report.md',
+                'historical-service/qa-intel/report.json',
+                'historical-service/qa-intel/summary.json',
+                'historical-service/qa-intel/run.json',
+              ].includes(command.artifactPath) : false)) {
+      throw new Error('PR109 read-only artifact access not permitted');
+    }
+    return {command,project};
   }
   if (command.action === 'health') {
     if (command.branch !== undefined || command.mode !== undefined ||
@@ -237,6 +281,17 @@ export function validateCommand(command, keyId, now = Date.now()) {
       if (command.mode !== 'validation') throw new Error('Pipeline mode not permitted');
       if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha)) {
         throw new Error('Invalid Semaphore revision');
+      }
+      // One reviewed, validation-only run. Never permit another SHA on this branch.
+      if (command.project === 'amaraii-os' &&
+          command.branch === 'feat/gym-historical-service-review-20261112' &&
+          command.commitSha !== '43690eef91cf5fa1e35bee7257312c2cb2586f48') {
+        throw new Error('PR109 validation revision not permitted');
+      }
+      if (command.project === 'amaraii-os' &&
+          command.branch === 'feat/gym-historical-reconciliation-integration-20261113' &&
+          command.commitSha !== '48bbd49b702bdd560dd97b6ce5a83bdf009af0d0') {
+        throw new Error('PR110 validation revision not permitted');
       }
     } else if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) {
       throw new Error('Pipeline mode not permitted');
@@ -388,7 +443,11 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return {...result,provider:'circleci',requestedRevision:command.commitSha,
       revisionVerificationRequired:true,selectionReason:selection.reason};
   }
-  if (command.provider === 'semaphore') return executeSemaphore(env, command, requestFn);
+  if (command.provider === 'semaphore') {
+    if (['pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action))
+      return executePr109Evidence(env,command,requestFn);
+    return executeSemaphore(env, command, requestFn);
+  }
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',

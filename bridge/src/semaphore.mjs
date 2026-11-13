@@ -7,7 +7,34 @@
 const API = 'https://amaraii.semaphoreci.com/api/v1alpha';
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const SHA = /^[a-f0-9]{40}$/;
-export const SEMAPHORE_BRANCHES = Object.freeze(['ci/semaphore-validation-20261106','development']);
+const PR109_BRANCH = 'feat/gym-historical-service-review-20261112';
+const PR109_SHA = '43690eef91cf5fa1e35bee7257312c2cb2586f48';
+const PR110_BRANCH = 'feat/gym-historical-reconciliation-integration-20261113';
+const PR110_SHA = '48bbd49b702bdd560dd97b6ce5a83bdf009af0d0';
+export const SEMAPHORE_BRANCHES = Object.freeze(['ci/semaphore-validation-20261106','development',PR109_BRANCH,PR110_BRANCH]);
+export const PR110_DIAGNOSTIC=Object.freeze({
+  branch: PR110_BRANCH,
+  sha: PR110_SHA,
+  pipelineId: '0681f323-34b8-413f-9672-742123060e6b',
+  jobId: '7418b830-a9fb-4701-9a11-1a262fdfbd40'
+});
+function safeDirective(value) {
+  if (typeof value !== 'string') return 'unnamed';
+  if (/pnpm typecheck/.test(value))return 'typecheck';
+  if (/pnpm --filter @amaraii\/api test/.test(value))return 'api tests';
+  if (/pnpm exec vitest run test\/p2-clarification/.test(value))return 'p2 database tests';
+  if (/pnpm exec vitest/.test(value))return 'focused tests';
+  if (/pnpm --filter @amaraii\/api docs:generate/.test(value))return 'OpenAPI generation';
+  if (/pnpm build/.test(value))return 'build';
+  if (/pnpm qa:intel/.test(value))return 'QA-Intel';
+  if (/pnpm exec playwright/.test(value))return 'browser setup';
+  if (/pnpm install/.test(value))return 'frozen dependency installation';
+  if (/artifact push/.test(value))return 'artifact upload';
+  if (/^printf|SEMAPHORE_JOB_RESULT|SEMAPHORE_GIT_WORKING_BRANCH/.test(value))return 'reporting epilogue';
+  if (/docker/.test(value))return 'disposable database setup';
+  return 'other';
+}
+
 
 function projectId(env) {
   if (typeof env.SEMAPHORE_PROJECT_ID !== 'string' || !UUID.test(env.SEMAPHORE_PROJECT_ID)) {
@@ -45,6 +72,47 @@ function safeValue(value, allowed) {
 }
 
 export async function executeSemaphore(env, command, requestFn = fetch) {
+  if (command.action === 'pr110_diagnostics') {
+    const id=projectId(env);
+    const expected=PR110_DIAGNOSTIC;
+    if (command.pipelineId !== expected.pipelineId || command.jobId !== expected.jobId)
+      throw new Error('PR110 diagnostic scope not permitted');
+    const basic=await semaphoreRequest(env,'/pipelines/'+expected.pipelineId,undefined,requestFn);
+    const p=basic.pipeline;
+    if (!p || p.project_id!==id || p.ppl_id!==expected.pipelineId ||
+        p.branch_name!==expected.branch || p.commit_sha!==expected.sha)
+      throw new Error('PR110 pipeline ownership mismatch');
+    const detail=await semaphoreRequest(env,'/pipelines/'+expected.pipelineId+'?detailed=true',undefined,requestFn);
+    if (!detail.pipeline || (detail.pipeline.project_id && detail.pipeline.project_id!==id) ||
+      !(Array.isArray(detail.blocks) && detail.blocks.some(b=>
+        Array.isArray(b.jobs) && b.jobs.some(j=>j.job_id===expected.jobId &&
+          j.result?.toLowerCase()==='failed'))))
+      throw new Error('PR110 job ownership mismatch');
+    const log=await semaphoreRequest(env,'/logs/'+expected.jobId,undefined,requestFn);
+    if (!Array.isArray(log.events) || log.events.length>30000)
+      throw new Error('Invalid or excessive PR110 diagnostic log');
+    const commands=[];
+    const outputs={};
+    for (const event of log.events) {
+      if (event.event==='cmd_finished') {
+        const exitCode=Number.isSafeInteger(event.exit_code)?event.exit_code:null;
+        commands.push({ordinal:commands.length+1,category:safeDirective(event.directive),
+          exitCode,failed:exitCode!==null && exitCode!==0});
+      } else if (event.event==='cmd_output' && typeof event.output==='string') {
+        // Count categories, never retain or return output bytes, URLs or secrets.
+        const s=event.output.slice(0,32768);
+        for (const [label,regex] of [
+          ['typescript',/error TS[0-9]+/],['unit',/Failed Tests|FAIL /],
+          ['openapi',/OpenAPI|generated-openapi/],['database',/migration|PostgreSQL/],
+          ['browser',/playwright|chromium/],['qa',/qa.intel/i],
+        ]) if(regex.test(s)) outputs[label]=(outputs[label]||0)+1;
+      }
+    }
+    return {action:'pr110_diagnostics',pipelineId:expected.pipelineId,
+      revision:expected.sha,jobId:expected.jobId,
+      commands:commands.slice(-180),eventCount:log.events.length,
+      signalCounts:outputs,rawLogsReturned:false};
+  }
   if (command.action === 'health') {
     return {
       provider:'semaphore', project:command.project,
@@ -56,6 +124,10 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
   }
   const id = projectId(env);
   if (command.action === 'trigger') {
+    if (command.branch === PR109_BRANCH && command.commitSha !== PR109_SHA)
+      throw new Error('PR109 validation revision not permitted');
+    if (command.branch === PR110_BRANCH && command.commitSha !== PR110_SHA)
+      throw new Error('PR110 validation revision not permitted');
     const response = await semaphoreRequest(env, '/plumber-workflows', {
       project_id:id,
       reference:'refs/heads/' + command.branch,
