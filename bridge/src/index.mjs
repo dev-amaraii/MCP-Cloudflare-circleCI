@@ -7,7 +7,7 @@
  * Approved release requests only trigger a separate SHA-pinned CircleCI
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
-import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import { executeSemaphore, SEMAPHORE_BRANCHES, PR110_DIAGNOSTIC } from './semaphore.mjs';
 import { selectProvider } from './provider-routing.mjs';
 import { executePr109Evidence } from './amaraii-pr109-evidence.mjs';
 
@@ -214,8 +214,20 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
   if (provider === 'semaphore' &&
-      (command.project !== 'amaraii-os' || !['health','trigger','inspect','pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action))) {
+      (command.project !== 'amaraii-os' || !['health','trigger','inspect','pr110_diagnostics','pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action))) {
     throw new Error('Semaphore action not permitted');
+  }
+  // Exact, project/commit/job-locked synthetic CI metadata only.
+  if (command.action === 'pr110_diagnostics') {
+    if (provider !== 'semaphore' || command.project !== 'amaraii-os' ||
+        command.pipelineId !== PR110_DIAGNOSTIC.pipelineId ||
+        command.jobId !== PR110_DIAGNOSTIC.jobId ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined || command.artifactPath !== undefined) {
+      throw new Error('PR110 diagnostic request not permitted');
+    }
+    return {command,project};
   }
   // Exact-commit, read-only historical PT artifacts. No trigger or arbitrary URL.
   if (['pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action)) {
