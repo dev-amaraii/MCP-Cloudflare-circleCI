@@ -278,7 +278,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
       }
       if (command.project === 'amaraii-os' &&
           command.branch === 'feat/gym-historical-reconciliation-integration-20261113' &&
-          command.commitSha !== '712cd7c414ae332f3cfbc026ca699567920f0994') {
+          command.commitSha !== '48bbd49b702bdd560dd97b6ce5a83bdf009af0d0') {
         throw new Error('PR110 validation revision not permitted');
       }
     } else if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) {
