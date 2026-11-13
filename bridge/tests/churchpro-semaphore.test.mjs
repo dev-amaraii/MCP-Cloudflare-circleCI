@@ -406,6 +406,7 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
   const branchOperations = 'codex/churchpro-phase2-department-operations-20261112';
   const branchConversion = 'codex/churchpro-p2-3h-classification-policy-20261113';
   const branchPrivate = 'codex/churchpro-p2-g1-private-profile-20261113';
+  const branchDuplicateReview = 'codex/churchpro-p2-g2-duplicate-review-20261113';
   assert.throws(() => valid(command('trigger', {
     branch, commitSha: revision, mode: 'validation',
   })), /Branch not permitted/);
@@ -472,6 +473,19 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
     });
   });
   assert.equal(privateInspection.vcs.branch, branchPrivate);
+  const reviewPipeline = { pipeline: { ...basic.pipeline, branch_name: branchDuplicateReview } };
+  const reviewRequests = [];
+  const reviewInspection = await execute(command('inspect', { pipelineId }), async url => {
+    reviewRequests.push(url);
+    return response(reviewRequests.length === 1 ? reviewPipeline : {
+      pipeline: reviewPipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(reviewInspection.vcs.branch, branchDuplicateReview);
+  assert.equal(reviewRequests.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: branchDuplicateReview, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
   assert.equal(requestsPrivate.length, 2);
   assert.throws(() => valid(command('trigger', {
     branch: branchPrivate, commitSha: revision, mode: 'validation',
