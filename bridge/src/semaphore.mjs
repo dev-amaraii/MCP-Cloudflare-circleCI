@@ -73,6 +73,7 @@ function safeValue(value, allowed) {
 
 export async function executeSemaphore(env, command, requestFn = fetch) {
   if (command.action === 'pr110_diagnostics') {
+    const id=projectId(env);
     const expected=PR110_DIAGNOSTIC;
     if (command.pipelineId !== expected.pipelineId || command.jobId !== expected.jobId)
       throw new Error('PR110 diagnostic scope not permitted');
