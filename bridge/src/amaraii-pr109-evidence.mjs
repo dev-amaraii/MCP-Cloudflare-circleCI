@@ -13,6 +13,14 @@ export const PR109 = Object.freeze({
   jobName: "Contracts, Gym preview, workspace checks",
 });
 
+// Permit one additional fully validated screenshot run; no arbitrary SHA.
+export const PR109_LATEST = Object.freeze({
+  ...PR109,
+  sha: "43690eef91cf5fa1e35bee7257312c2cb2586f48",
+  pipelineId: "2f31de42-8369-40fe-b8a7-dbd2ba5877ea",
+  jobId: "6389bc7e-8ee0-4b20-8f19-8ae16d069dc8",
+});
+
 const API = "https://amaraii.semaphoreci.com/api/v1alpha";
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const MAX_IMAGE = 1600000;
@@ -68,12 +76,13 @@ async function api(env, path, fetchFn) {
 async function owned(env, pipelineId, fetchFn) {
   if (!UUID.test(pipelineId || "")) throw Error("Invalid pipeline identity");
   const projectId = semaphoreProjectId(env);
+  const approved = pipelineId === PR109_LATEST.pipelineId ? PR109_LATEST : PR109;
   const data = await api(env, "/pipelines/" + pipelineId, fetchFn);
   const p = data.pipeline;
   if (!p || p.project_id !== projectId ||
       p.ppl_id !== pipelineId ||
-      p.branch_name !== PR109.branch ||
-      p.commit_sha !== PR109.sha ||
+      p.branch_name !== approved.branch ||
+      p.commit_sha !== approved.sha ||
       String(p.state).toLowerCase() !== "done" ||
       String(p.result).toLowerCase() !== "passed" ||
       !UUID.test(p.wf_id || "")) throw Error("PR109 pipeline ownership mismatch");
@@ -84,13 +93,13 @@ async function owned(env, pipelineId, fetchFn) {
     throw Error("PR109 pipeline ownership mismatch");
   const jobs = (Array.isArray(detailed.blocks) ? detailed.blocks : [])
     .flatMap(b => Array.isArray(b.jobs) ? b.jobs : []);
-  if (!jobs.some(j => j.job_id === PR109.jobId &&
-      j.name === PR109.jobName &&
+  if (!jobs.some(j => j.job_id === approved.jobId &&
+      j.name === approved.jobName &&
       String(j.status).toLowerCase() === "finished" &&
       String(j.result).toLowerCase() === "passed")) {
     throw Error("PR109 job ownership mismatch");
   }
-  return {pipelineId, workflowId:p.wf_id, jobId:PR109.jobId, revision:PR109.sha};
+  return {pipelineId, workflowId:p.wf_id, jobId:approved.jobId, revision:approved.sha};
 }
 async function list(env, scopeId, directory, fetchFn) {
   const url = "/artifacts?scope=jobs&scope_id=" + scopeId +
