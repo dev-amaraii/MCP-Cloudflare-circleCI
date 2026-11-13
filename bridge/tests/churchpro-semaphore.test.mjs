@@ -145,6 +145,46 @@ test('inspect requires a pipeline belonging to the ChurchPro project and branch'
 });
 
 
+test('inspect returns bounded Jest failure names without exposing credentials or raw log output', async () => {
+  const basic = { pipeline: {
+    ppl_id: pipelineId, wf_id: workflowId,
+    project_id: projectId, branch_name: CHURCHPRO_SEMAPHORE.branch,
+    state: 'done', result: 'failed', commit_sha: revision,
+  } };
+  const detailed = {
+    ...basic,
+    blocks: [{ name: 'Disposable PostgreSQL and agent QA', state: 'done', result: 'failed',
+      jobs: [{ job_id: id, name: 'Database, authenticated API and strict QA-Intel',
+        status: 'finished', result: 'failed' }] }],
+  };
+  let count = 0;
+  const out = await execute(command('inspect', { pipelineId }), async () => {
+    count++;
+    if (count === 1) return response(basic);
+    if (count === 2) return response(detailed);
+    return response({ events: [
+      { event: 'cmd_started', directive: 'corepack pnpm --filter "@churchpro/api" test' },
+      { event: 'cmd_output', output: [
+        'synthetic build output '.repeat(300),
+        '● Phase 2 Department API: current permissions › requires branch affiliation',
+        'Expected: 404',
+        'Received: 409',
+        'API_KEY: do-not-disclose',
+        'https://private.example.invalid/secret',
+        'Tests:       2 failed, 141 passed, 143 total',
+      ].join('\n') },
+      { event: 'cmd_finished', exit_code: 1 },
+    ] });
+  });
+  assert.equal(out.failure.failedTestCases.length, 1);
+  assert.match(out.failure.failedTestCases[0], /requires branch affiliation/);
+  assert.ok(out.failure.diagnosticLines.some(line => line.includes('Expected: 404')));
+  assert.ok(out.failure.diagnosticLines.some(line => line.includes('Received: 409')));
+  assert.equal(JSON.stringify(out).includes('do-not-disclose'), false);
+  assert.equal(JSON.stringify(out).includes('private.example.invalid'), false);
+  assert.equal(JSON.stringify(out).includes(env.SEMAPHORE_TOKEN), false);
+});
+
 test('ChurchPro artifact report reads only owned exact-revision sanitized QA summaries', async () => {
   const path = 'qa-intel/churchpro/agent-handoff.json';
   const stored = 'agent-handoff.json';
@@ -359,4 +399,127 @@ test('ChurchPro visual PNG reads are restricted to synthetic review filenames', 
       ppl_id: pipelineId, wf_id: workflowId, commit_sha: revision } });
   }), /ownership mismatch/);
   assert.equal(requests.length, 1, 'Foreign project must not leak images or artifact paths');
+});
+
+test('department PR #20 is read-only inspectable without expanding triggers, artifacts or foreign-project access', async () => {
+  const branch = 'codex/churchpro-phase2-departments-foundation-20261112';
+  const branchOperations = 'codex/churchpro-phase2-department-operations-20261112';
+  const branchConversion = 'codex/churchpro-p2-3h-classification-policy-20261113';
+  const branchPrivate = 'codex/churchpro-p2-g1-private-profile-20261113';
+  const branchDuplicateReview = 'codex/churchpro-p2-g2-duplicate-review-20261113';
+  assert.throws(() => valid(command('trigger', {
+    branch, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+
+  const basic = { pipeline: {
+    ppl_id: pipelineId, wf_id: workflowId, project_id: projectId,
+    branch_name: branch, state: 'done', result: 'failed', commit_sha: revision,
+  } };
+  const calls = [];
+  const out = await execute(command('inspect', { pipelineId }), async url => {
+    calls.push(url);
+    if (calls.length === 1) return response(basic);
+    if (calls.length === 2) return response({
+      pipeline: { ...basic.pipeline },
+      blocks: [{ name: 'Disposable PostgreSQL', state: 'done', result: 'failed',
+        jobs: [{ job_id: id, name: 'Drizzle and integration', status: 'finished', result: 'failed' }] }],
+    });
+    return response({ events: [
+      { event: 'cmd_started', directive: 'corepack pnpm --filter @churchpro/database db:check' },
+      { event: 'cmd_output', output: 'error: synthetic schema mismatch' },
+      { event: 'cmd_finished', exit_code: 1 },
+    ] });
+  });
+  assert.equal(out.project, 'churchpro');
+  assert.equal(out.vcs.branch, branch);
+  assert.equal(out.vcs.revision, revision);
+  assert.equal(out.failure.exitCode, 1);
+  assert.equal(calls.length, 3);
+
+  for (const invalid of [
+    { ...basic.pipeline, branch_name: 'main' },
+    { ...basic.pipeline, project_id: otherProjectId },
+  ]) {
+    const denied = [];
+    await assert.rejects(execute(command('inspect', { pipelineId }), async url => {
+      denied.push(url);
+      return response({ pipeline: invalid });
+    }), /ownership mismatch/);
+    assert.equal(denied.length, 1, 'deny before detailed jobs or logs');
+  }
+  const departmentOperationsPipeline = { pipeline: { ...basic.pipeline, branch_name: branchOperations } };
+  const validOperations = [];
+  const operations = await execute(command('inspect', { pipelineId }), async url => {
+    validOperations.push(url);
+    if (validOperations.length === 1) return response(departmentOperationsPipeline);
+    return response({ pipeline: departmentOperationsPipeline.pipeline, blocks: [] });
+  });
+  assert.equal(operations.vcs.branch, branchOperations);
+  const conversionPipeline = { pipeline: { ...basic.pipeline, branch_name: branchConversion } };
+  const validConversion = [];
+  const conversion = await execute(command('inspect', { pipelineId }), async url => {
+    validConversion.push(url);
+    return response(validConversion.length === 1 ? conversionPipeline : {
+      pipeline: conversionPipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(conversion.vcs.branch, branchConversion);
+  const privatePipeline = { pipeline: { ...basic.pipeline, branch_name: branchPrivate } };
+  const requestsPrivate = [];
+  const privateInspection = await execute(command('inspect', { pipelineId }), async url => {
+    requestsPrivate.push(url);
+    return response(requestsPrivate.length === 1 ? privatePipeline : {
+      pipeline: privatePipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(privateInspection.vcs.branch, branchPrivate);
+  const reviewPipeline = { pipeline: { ...basic.pipeline, branch_name: branchDuplicateReview } };
+  const reviewRequests = [];
+  const reviewInspection = await execute(command('inspect', { pipelineId }), async url => {
+    reviewRequests.push(url);
+    return response(reviewRequests.length === 1 ? reviewPipeline : {
+      pipeline: reviewPipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(reviewInspection.vcs.branch, branchDuplicateReview);
+  assert.equal(reviewRequests.length, 2);
+  const g3Branch = 'codex/churchpro-p2-g3-protected-person-lifecycle-20261113';
+  const g3Pipeline = { pipeline: { ...basic.pipeline, branch_name: g3Branch } };
+  const g3Requests = [];
+  const g3Inspection = await execute(command('inspect', { pipelineId }), async url => {
+    g3Requests.push(url);
+    return response(g3Requests.length === 1 ? g3Pipeline : {
+      pipeline: g3Pipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(g3Inspection.vcs.branch, g3Branch);
+  assert.equal(g3Requests.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: g3Branch, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId, jobId: id,
+  }), async () => response(g3Pipeline)), /ownership mismatch/);
+
+  assert.throws(() => valid(command('trigger', {
+    branch: branchDuplicateReview, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+  assert.equal(requestsPrivate.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: branchPrivate, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+  assert.equal(validConversion.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: branchConversion, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+
+  assert.equal(validOperations.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: branchOperations, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId, jobId: id,
+  }), async () => response(basic)), /ownership mismatch/,
+  'PR #20 must not acquire PR #18 artifact access');
 });

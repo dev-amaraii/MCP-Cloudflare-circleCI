@@ -48,10 +48,20 @@ function enumValue(value, allowed) {
     ? value.toLowerCase() : null;
 }
 
-function checkedPipeline(response, expectedId) {
+const CHURCHPRO_INSPECT_ONLY_BRANCHES = Object.freeze([
+  'codex/churchpro-phase2-departments-foundation-20261112',
+  'codex/churchpro-phase2-department-operations-20261112',
+  'codex/churchpro-p2-3h-classification-policy-20261113',
+  'codex/churchpro-p2-profile-protection-policy-20261113',
+  'codex/churchpro-p2-g1-private-profile-20261113',
+  'codex/churchpro-p2-g2-duplicate-review-20261113',
+  // G3 Person deletion lifecycle: read-only diagnostics only, never trigger/artifacts.
+  'codex/churchpro-p2-g3-protected-person-lifecycle-20261113',
+]);
+function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
   if (!pipeline || pipeline.project_id !== expectedId ||
-      pipeline.branch_name !== CHURCHPRO_SEMAPHORE.branch ||
+      !allowedBranches.includes(pipeline.branch_name) ||
       (pipeline.ppl_id !== undefined && !UUID.test(pipeline.ppl_id))) {
     throw Error('ChurchPro Semaphore pipeline ownership mismatch');
   }
@@ -72,7 +82,7 @@ function failureSummary(payload) {
         output: '',
       };
     } else if (event.event === 'cmd_output' && current && typeof event.output === 'string') {
-      current.output = (current.output + event.output.slice(0, 2000)).slice(-16000);
+      current.output = (current.output + event.output.slice(0, 50000)).slice(-120000);
     } else if (event.event === 'cmd_finished' && current) {
       if (Number.isInteger(event.exit_code) && event.exit_code !== 0) {
         lastFailure = { ...current, exitCode: event.exit_code };
@@ -89,13 +99,17 @@ function failureSummary(payload) {
     .replace(/\b[A-Za-z0-9+/_=-]{32,}\b/g, '[redacted]')
     .slice(0, 180);
   const lines = lastFailure.output.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
-    .filter(line => /(?:\berror\b|\bwarning\b|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed|BROWSER_CASE_(?:FAIL|DIAGNOSTIC)|QA_INTEL_API|✖)/i.test(line))
+    .filter(line => /(?:\berror\b|\bwarning\b|ERR_|failed|failure|not found|not installed|command not found|TS\d{4}|TypeError|SyntaxError|AssertionError|cannot |denied|invalid |unsupported |malformed|BROWSER_CASE_(?:FAIL|DIAGNOSTIC)|QA_INTEL_API|✖|^\s*●\s+|\bExpected:|\bReceived:|expected\s+\d{3}|got\s+\d{3}|Test Suites:|Tests:)/i.test(line))
     .filter(line => !/(?:API[_-]?KEY|SECRET|PASSWORD|TOKEN|AUTHORIZATION|PRIVATE[_-]?KEY)\s*[:=]/i.test(line))
-    .slice(-10).map(redact);
+    .slice(-22).map(redact);
+  const failedTestCases = lastFailure.output.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
+    .filter(line => /^\s*●\s+Phase 2 Department API:/i.test(line))
+    .slice(-6).map(redact);
   return {
     command: redact(lastFailure.command),
     exitCode: lastFailure.exitCode,
     diagnosticLines: [...new Set(lines)],
+    ...(failedTestCases.length ? { failedTestCases: [...new Set(failedTestCases)] } : {}),
   };
 }
 
@@ -487,7 +501,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     if (!UUID.test(command.pipelineId ?? '')) throw Error('Invalid ChurchPro pipeline identity');
     const base = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
       undefined, requestFn);
-    const pipeline = checkedPipeline(base, id);
+    const pipeline = checkedPipeline(base, id, [CHURCHPRO_SEMAPHORE.branch, ...CHURCHPRO_INSPECT_ONLY_BRANCHES]);
     if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId) {
       throw Error('ChurchPro Semaphore pipeline identity mismatch');
     }
@@ -498,7 +512,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     const detailed = details?.pipeline;
     if (!detailed ||
         (detailed.project_id && detailed.project_id !== id) ||
-        (detailed.branch_name && detailed.branch_name !== CHURCHPRO_SEMAPHORE.branch) ||
+        (detailed.branch_name && detailed.branch_name !== pipeline.branch_name) ||
         (detailed.ppl_id && detailed.ppl_id !== command.pipelineId) ||
         (detailed.wf_id && detailed.wf_id !== pipeline.wf_id)) {
       throw Error('ChurchPro Semaphore workflow identity mismatch');
@@ -540,7 +554,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       state: enumValue(pipeline.state, ['pending', 'running', 'done', 'stopping', 'stopped', 'queued']),
       result: enumValue(pipeline.result, ['passed', 'failed', 'stopped', 'canceled', 'skipped']),
       vcs: {
-        branch: CHURCHPRO_SEMAPHORE.branch,
+        branch: pipeline.branch_name,
         revision: SHA.test(pipeline.commit_sha ?? '') ? pipeline.commit_sha : null,
       },
       blocks,
