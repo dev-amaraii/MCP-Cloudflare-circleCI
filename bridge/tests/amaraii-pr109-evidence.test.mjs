@@ -135,6 +135,18 @@ test("cannot act as deployment, provider trigger, or cross-tenant proxy",async()
  ])await assert.rejects(executePr109Evidence(env,wrong,fake().fetchFn));
 });
 
+test("admits bounded QA-Intel run JSON for this pinned job only",()=>{
+ const now=Date.now(),id="66666666-6666-4666-8666-666666666666";
+ const common={v:1,id,project:"amaraii-os",provider:"semaphore",approved:true,
+   requestedAt:new Date(now).toISOString(),pipelineId};
+ assert.doesNotThrow(()=>validateCommand({...common,action:"pr109_report",
+   artifactPath:"historical-service/qa-intel/run.json"},id,now));
+ assert.doesNotThrow(()=>validateCommand({...common,action:"pr109_artifacts",
+   artifactPath:"historical-service/qa-intel/artifacts"},id,now));
+ assert.throws(()=>validateCommand({...common,action:"pr109_report",
+   artifactPath:"historical-service/qa-intel/results.db"},id,now));
+});
+
 test("Queue validator accepts only reviewed, bounded PR109 command shapes",()=>{
  const now=Date.now();
  const id="66666666-6666-4666-8666-666666666666";
