@@ -10,7 +10,7 @@ const SHA = /^[a-f0-9]{40}$/;
 const PR109_BRANCH = 'feat/gym-historical-service-review-20261112';
 const PR109_SHA = '43690eef91cf5fa1e35bee7257312c2cb2586f48';
 const PR110_BRANCH = 'feat/gym-historical-reconciliation-integration-20261113';
-const PR110_SHA = '6f59caa88207f09641474da3c1004e2af4d6cd17';
+const PR110_SHA = '1578fd7b19cd91b36207a0667923ef0e8fd8fdd3';
 export const SEMAPHORE_BRANCHES = Object.freeze(['ci/semaphore-validation-20261106','development',PR109_BRANCH,PR110_BRANCH]);
 
 function projectId(env) {
