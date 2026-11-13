@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {executePr109Evidence,PR109} from "../src/amaraii-pr109-evidence.mjs";
 import {validateCommand} from "../src/index.mjs";
+import {executeSemaphore} from "../src/semaphore.mjs";
 
 const projectId="11111111-1111-4111-8111-111111111111";
 const pipelineId="22222222-2222-4222-8222-222222222222";
@@ -167,4 +168,36 @@ test("Queue validator accepts only reviewed, bounded PR109 command shapes",()=>{
    {action:"pr109_png",pipelineId,artifactPath:pngPath,provider:"circleci"},
    {action:"pr109_png",pipelineId,artifactPath:pngPath,project:"churchpro"},
  ])assert.throws(()=>validateCommand({...baseEnvelope,...bad},id,now));
+});
+
+test("PR109 Semaphore run is exactly pinned and never accepts another branch revision",async()=>{
+ const now=Date.now(),id="66666666-6666-4666-8666-666666666666";
+ const branch="feat/gym-historical-service-review-20261112";
+ const commitSha="43690eef91cf5fa1e35bee7257312c2cb2586f48";
+ const envelope={v:1,id,action:"trigger",project:"amaraii-os",
+   provider:"semaphore",branch,commitSha,mode:"validation",
+   approved:true,requestedAt:new Date(now).toISOString()};
+ assert.doesNotThrow(()=>validateCommand(envelope,id,now));
+ assert.throws(()=>validateCommand({...envelope,commitSha:"a".repeat(40)},id,now),
+   /PR109 validation revision not permitted/);
+ assert.throws(()=>validateCommand({...envelope,artifactPath:"secret.env"},id,now));
+ const calls=[];
+ const mock=async(url,options)=>{
+   calls.push({url,options});
+   return response({workflow_id:"33333333-3333-4333-8333-333333333333",
+     pipeline_id:"22222222-2222-4222-8222-222222222222"});
+ };
+ const allowed=await executeSemaphore(env,envelope,mock);
+ assert.equal(allowed.requestedRevision,commitSha);
+ assert.equal(calls.length,1);
+ assert.equal(calls[0].url,origin+"/plumber-workflows");
+ assert.deepEqual(JSON.parse(calls[0].options.body),{
+   project_id:projectId,
+   reference:"refs/heads/"+branch,
+   commit_sha:commitSha,
+   pipeline_file:".semaphore/semaphore.yml",
+ });
+ await assert.rejects(executeSemaphore(env,{...envelope,commitSha:"b".repeat(40)},mock),
+   /PR109 validation revision not permitted/);
+ assert.equal(calls.length,1);
 });
