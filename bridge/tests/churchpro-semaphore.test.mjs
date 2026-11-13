@@ -494,6 +494,29 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
   });
   assert.equal(g3Inspection.vcs.branch, g3Branch);
   assert.equal(g3Requests.length, 2);
+  // G4a is a separate exact-branch, read-only inspect exception. Its tests
+  // must not allow triggering paid jobs or granting artifact/screenshot access.
+  const g4aBranch = 'codex/churchpro-p2-g4a-person-lifecycle-ui-20261113';
+  const g4aPipeline = { pipeline: { ...basic.pipeline, branch_name: g4aBranch } };
+  const g4aRequests = [];
+  const g4aInspection = await execute(command('inspect', { pipelineId }), async url => {
+    g4aRequests.push(url);
+    return response(g4aRequests.length === 1 ? g4aPipeline : {
+      pipeline: g4aPipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(g4aInspection.vcs.branch, g4aBranch);
+  assert.equal(g4aInspection.vcs.revision, revision);
+  assert.equal(g4aRequests.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: g4aBranch, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId, jobId: id,
+  }), async () => response(g4aPipeline)), /ownership mismatch/);
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId, jobId: id, artifactPath: 'qa-intel/churchpro/agent-handoff.json',
+  }), async () => response(g4aPipeline)), /ownership mismatch/);
   assert.throws(() => valid(command('trigger', {
     branch: g3Branch, commitSha: revision, mode: 'validation',
   })), /Branch not permitted/);
