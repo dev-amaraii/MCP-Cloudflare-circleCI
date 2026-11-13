@@ -9,7 +9,9 @@ const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const SHA = /^[a-f0-9]{40}$/;
 const PR109_BRANCH = 'feat/gym-historical-service-review-20261112';
 const PR109_SHA = '43690eef91cf5fa1e35bee7257312c2cb2586f48';
-export const SEMAPHORE_BRANCHES = Object.freeze(['ci/semaphore-validation-20261106','development',PR109_BRANCH]);
+const PR110_BRANCH = 'feat/gym-historical-reconciliation-integration-20261113';
+const PR110_SHA = 'd07249343308bb0b2847058d0435ec84fccbedb8';
+export const SEMAPHORE_BRANCHES = Object.freeze(['ci/semaphore-validation-20261106','development',PR109_BRANCH,PR110_BRANCH]);
 
 function projectId(env) {
   if (typeof env.SEMAPHORE_PROJECT_ID !== 'string' || !UUID.test(env.SEMAPHORE_PROJECT_ID)) {
@@ -60,6 +62,8 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
   if (command.action === 'trigger') {
     if (command.branch === PR109_BRANCH && command.commitSha !== PR109_SHA)
       throw new Error('PR109 validation revision not permitted');
+    if (command.branch === PR110_BRANCH && command.commitSha !== PR110_SHA)
+      throw new Error('PR110 validation revision not permitted');
     const response = await semaphoreRequest(env, '/plumber-workflows', {
       project_id:id,
       reference:'refs/heads/' + command.branch,
