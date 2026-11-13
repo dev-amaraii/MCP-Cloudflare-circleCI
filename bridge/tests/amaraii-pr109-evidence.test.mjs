@@ -200,6 +200,30 @@ test("Queue validator accepts only reviewed, bounded PR109 command shapes",()=>{
  ])assert.throws(()=>validateCommand({...baseEnvelope,...bad},id,now));
 });
 
+test("PR110 integration validation cannot trigger for another revision or project",async()=>{
+ const id="66666666-6666-4666-8666-666666666666",now=Date.now();
+ const branch="feat/gym-historical-reconciliation-integration-20261113";
+ const commitSha="d07249343308bb0b2847058d0435ec84fccbedb8";
+ const command={v:1,id,action:"trigger",project:"amaraii-os",provider:"semaphore",
+   branch,commitSha,mode:"validation",approved:true,requestedAt:new Date(now).toISOString()};
+ assert.doesNotThrow(()=>validateCommand(command,id,now));
+ assert.throws(()=>validateCommand({...command,commitSha:"a".repeat(40)},id,now),
+   /PR110 validation revision not permitted/);
+ const calls=[];
+ const mock=async(url,options)=>{calls.push({url,options});
+   return response({workflow_id:"33333333-3333-4333-8333-333333333333",
+     pipeline_id:"22222222-2222-4222-8222-222222222222"});};
+ const result=await executeSemaphore(env,command,mock);
+ assert.equal(result.requestedRevision,commitSha);
+ assert.equal(calls.length,1);
+ const body=JSON.parse(calls[0].options.body);
+ assert.deepEqual(body,{project_id:projectId,reference:"refs/heads/"+branch,
+   commit_sha:commitSha,pipeline_file:".semaphore/semaphore.yml"});
+ await assert.rejects(executeSemaphore(env,{...command,commitSha:"b".repeat(40)},mock),
+   /PR110 validation revision not permitted/);
+ assert.equal(calls.length,1);
+});
+
 test("PR109 Semaphore run is exactly pinned and never accepts another branch revision",async()=>{
  const now=Date.now(),id="66666666-6666-4666-8666-666666666666";
  const branch="feat/gym-historical-service-review-20261112";
