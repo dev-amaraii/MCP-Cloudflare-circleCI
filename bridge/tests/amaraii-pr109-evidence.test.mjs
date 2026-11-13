@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {executePr109Evidence,PR109} from "../src/amaraii-pr109-evidence.mjs";
+import {executePr109Evidence,PR109,PR109_LATEST} from "../src/amaraii-pr109-evidence.mjs";
 import {validateCommand} from "../src/index.mjs";
 import {executeSemaphore} from "../src/semaphore.mjs";
 
@@ -69,6 +69,36 @@ function fake(overrides={}){
  };
  return {calls,fetchFn};
 }
+test("reads only the new exact passed PT screenshot pipeline and preserves old access",async()=>{
+ const fetchFn=async(url)=>{
+  if(url===origin+"/pipelines/"+PR109_LATEST.pipelineId) return response({pipeline:{
+    ppl_id:PR109_LATEST.pipelineId,project_id:projectId,
+    branch_name:PR109_LATEST.branch,commit_sha:PR109_LATEST.sha,
+    wf_id:workflowId,state:"done",result:"passed",
+  }});
+  if(url===origin+"/pipelines/"+PR109_LATEST.pipelineId+"?detailed=true")
+   return response({pipeline:{project_id:projectId,wf_id:workflowId},blocks:[{jobs:[{
+    job_id:PR109_LATEST.jobId,name:PR109_LATEST.jobName,
+    status:"finished",result:"passed",
+   }]}]});
+  if(url.startsWith(origin+"/artifacts?"))return response({artifacts:[
+    {path:"historical-service/screenshots/historical-service-390.png",
+     is_directory:false,size:40},
+  ]});
+  return response({error:"unexpected request"},404);
+ };
+ const actual=await executePr109Evidence(env,cmd("pr109_artifacts",{
+  pipelineId:PR109_LATEST.pipelineId,
+  artifactPath:"historical-service/screenshots",
+ }),fetchFn);
+ assert.equal(actual.revision,PR109_LATEST.sha);
+ assert.equal(actual.jobId,PR109_LATEST.jobId);
+ assert.equal(actual.artifacts.length,1);
+ const old=await executePr109Evidence(env,cmd("pr109_artifacts"),fake().fetchFn);
+ assert.equal(old.revision,PR109.sha);
+ assert.equal(old.jobId,PR109.jobId);
+});
+
 test("discovers only a passed SHA-pinned Amaraii job",async()=>{
  const mock=fake();
  const found=await executePr109Evidence(env,{...base,action:"pr109_discover"},mock.fetchFn);
