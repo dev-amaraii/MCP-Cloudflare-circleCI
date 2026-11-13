@@ -517,6 +517,30 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
   await assert.rejects(execute(command('churchpro_report', {
     pipelineId, jobId: id, artifactPath: 'qa-intel/churchpro/agent-handoff.json',
   }), async () => response(g4aPipeline)), /ownership mismatch/);
+  // G4b must be a separately scoped read-only exception, never a paid trigger,
+  // signed report, artifact browse, or foreign branch/project disclosure.
+  const g4bBranch = 'codex/churchpro-p2-g4b-private-profile-duplicate-ui-20261113';
+  const g4bPipeline = { pipeline: { ...basic.pipeline, branch_name: g4bBranch } };
+  const g4bRequests = [];
+  const g4bInspection = await execute(command('inspect', { pipelineId }), async url => {
+    g4bRequests.push(url);
+    return response(g4bRequests.length === 1 ? g4bPipeline : {
+      pipeline: g4bPipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(g4bInspection.vcs.branch, g4bBranch);
+  assert.equal(g4bInspection.vcs.revision, revision);
+  assert.equal(g4bRequests.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: g4bBranch, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId, jobId: id,
+  }), async () => response(g4bPipeline)), /ownership mismatch/);
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId, jobId: id, artifactPath: 'qa-intel/churchpro/agent-handoff.json',
+  }), async () => response(g4bPipeline)), /ownership mismatch/);
+
   assert.throws(() => valid(command('trigger', {
     branch: g3Branch, commitSha: revision, mode: 'validation',
   })), /Branch not permitted/);
