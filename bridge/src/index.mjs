@@ -9,6 +9,7 @@
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
 import { selectProvider } from './provider-routing.mjs';
+import { executePr109Evidence } from './amaraii-pr109-evidence.mjs';
 
 const API = 'https://circleci.com/api/v2';
 const PREFIX = 'requests/';
@@ -213,8 +214,27 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
   if (provider === 'semaphore' &&
-      (command.project !== 'amaraii-os' || !['health','trigger','inspect'].includes(command.action))) {
+      (command.project !== 'amaraii-os' || !['health','trigger','inspect','pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action))) {
     throw new Error('Semaphore action not permitted');
+  }
+  // Exact-commit, read-only historical PT artifacts. No trigger or arbitrary URL.
+  if (['pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action)) {
+    if (provider !== 'semaphore' || command.project !== 'amaraii-os' ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.jobId !== undefined ||
+        command.jobNumber !== undefined || command.startNumber !== undefined ||
+        (command.action === 'pr109_discover'
+          ? command.pipelineId !== undefined || command.artifactPath !== undefined
+          : typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) ||
+        (command.action === 'pr109_artifacts'
+          ? command.artifactPath !== undefined &&
+              !['historical-service','historical-service/screenshots',
+                'historical-service/qa-intel','historical-service/qa-intel/screenshots'].includes(command.artifactPath)
+          : command.action !== 'pr109_discover' && (
+              typeof command.artifactPath !== 'string' || command.artifactPath.length > 240))) {
+      throw new Error('PR109 read-only artifact access not permitted');
+    }
+    return {command,project};
   }
   if (command.action === 'health') {
     if (command.branch !== undefined || command.mode !== undefined ||
@@ -388,7 +408,11 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return {...result,provider:'circleci',requestedRevision:command.commitSha,
       revisionVerificationRequired:true,selectionReason:selection.reason};
   }
-  if (command.provider === 'semaphore') return executeSemaphore(env, command, requestFn);
+  if (command.provider === 'semaphore') {
+    if (['pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action))
+      return executePr109Evidence(env,command,requestFn);
+    return executeSemaphore(env, command, requestFn);
+  }
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',
