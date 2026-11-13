@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {executePr109Evidence,PR109} from "../src/amaraii-pr109-evidence.mjs";
+import {validateCommand} from "../src/index.mjs";
 
 const projectId="11111111-1111-4111-8111-111111111111";
 const pipelineId="22222222-2222-4222-8222-222222222222";
@@ -132,4 +133,26 @@ test("cannot act as deployment, provider trigger, or cross-tenant proxy",async()
    {...base,action:"trigger"}, {...base,project:"churchpro",action:"pr109_discover"},
    {...base,provider:"circleci",action:"pr109_discover"},
  ])await assert.rejects(executePr109Evidence(env,wrong,fake().fetchFn));
+});
+
+test("Queue validator accepts only reviewed, bounded PR109 command shapes",()=>{
+ const now=Date.now();
+ const id="66666666-6666-4666-8666-666666666666";
+ const baseEnvelope={id,v:1,project:"amaraii-os",provider:"semaphore",
+   approved:true,requestedAt:new Date(now).toISOString()};
+ assert.doesNotThrow(()=>validateCommand({...baseEnvelope,action:"pr109_discover"},id,now));
+ assert.doesNotThrow(()=>validateCommand({...baseEnvelope,action:"pr109_artifacts",
+   pipelineId,artifactPath:"historical-service/screenshots"},id,now));
+ assert.doesNotThrow(()=>validateCommand({...baseEnvelope,action:"pr109_png",
+   pipelineId,artifactPath:pngPath},id,now));
+ for(const bad of [
+   {action:"pr109_discover",branch:"development"},
+   {action:"pr109_discover",commitSha:PR109.sha},
+   {action:"pr109_report",pipelineId,artifactPath:"../../private.env"},
+   {action:"pr109_artifacts",pipelineId,artifactPath:"qa-intel"},
+   {action:"pr109_png",pipelineId,jobNumber:12,artifactPath:pngPath},
+   {action:"pr109_artifacts",pipelineId,jobId:PR109.jobId},
+   {action:"pr109_png",pipelineId,artifactPath:pngPath,provider:"circleci"},
+   {action:"pr109_png",pipelineId,artifactPath:pngPath,project:"churchpro"},
+ ])assert.throws(()=>validateCommand({...baseEnvelope,...bad},id,now));
 });
