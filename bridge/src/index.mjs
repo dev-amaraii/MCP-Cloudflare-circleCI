@@ -270,6 +270,12 @@ export function validateCommand(command, keyId, now = Date.now()) {
       if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha)) {
         throw new Error('Invalid Semaphore revision');
       }
+      // One reviewed, validation-only run. Never permit another SHA on this branch.
+      if (command.project === 'amaraii-os' &&
+          command.branch === 'feat/gym-historical-service-review-20261112' &&
+          command.commitSha !== '43690eef91cf5fa1e35bee7257312c2cb2586f48') {
+        throw new Error('PR109 validation revision not permitted');
+      }
     } else if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) {
       throw new Error('Pipeline mode not permitted');
     }
