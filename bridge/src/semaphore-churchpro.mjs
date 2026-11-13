@@ -54,6 +54,7 @@ const CHURCHPRO_INSPECT_ONLY_BRANCHES = Object.freeze([
   'codex/churchpro-p2-3h-classification-policy-20261113',
   'codex/churchpro-p2-profile-protection-policy-20261113',
   'codex/churchpro-p2-g1-private-profile-20261113',
+  'codex/churchpro-p2-g2-duplicate-review-20261113',
 ]);
 function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
