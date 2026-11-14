@@ -217,8 +217,19 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (command.project === 'urban-design-paint' && provider !== 'semaphore') throw new Error('Urban Paints is Semaphore-only');
   if (provider === 'semaphore' && !(
       ['amaraii-os','urban-design-paint'].includes(command.project) &&
-      ['health','trigger','inspect','urban_preview_bundle','urban_preview_list'].includes(command.action))) {
+      ['health','trigger','inspect','urban_preview_bundle','urban_preview_list','urban_diagnostics'].includes(command.action))) {
     throw new Error('Semaphore action not permitted');
+  }
+  if (command.project === 'urban-design-paint' && command.action === 'urban_diagnostics') {
+    if (provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        command.branch !== URBAN_SEMAPHORE.branch ||
+        typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha) ||
+        command.mode !== undefined || command.artifactPath !== undefined ||
+        command.jobNumber !== undefined || command.startNumber !== undefined)
+      throw Error('Urban diagnostic request not permitted');
+    return {command,project};
   }
   if (command.project === 'urban-design-paint' && command.action === 'urban_preview_list') {
     if (provider !== 'semaphore' || typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
