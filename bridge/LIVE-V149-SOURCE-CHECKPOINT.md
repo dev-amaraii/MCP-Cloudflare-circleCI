@@ -66,3 +66,36 @@ These are **existing Gather** browser cases, not a P3.1 attendance UI. Human UAT
 5. On any future bridge deploy, guard against accidental removal of ChurchPro's two approved pinned QA readers and unaffected Amaraii/NEN/Urban project integrations.
 
 **Review context:** [ChurchPro issue #32](https://github.com/dev-amaraii/ChurchPro/issues/32) · [older bridge draft PR #27](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/27) · [NEN Context OS ChurchPro](https://app.notion.com/p/40dfa5e3c905811f8876e702464f8394).
+
+## Static/source review continuation — 14 November 2026
+
+**Why the first checkpoint was not enough:** Restoring the ChurchPro test corpus alone left live Urban Paints, NEN CMS and Amaraii bridge modules without their corresponding historical tests in the new source-parity branch. This was identified during PR #28 cross-project review, and the available source-matching test suites have now been copied from their owner branches without modifying deployed code:
+
+| Test file | Source branch | Named test groups |
+| --- | --- | ---: |
+| `churchpro-semaphore.test.mjs` | `fix/churchpro-p31-api-pinned-ci-inspect-20261114` | 27 |
+| `churchpro-v149-pin.test.mjs` | New on PR #28 | 5 |
+| `live-v149-source-parity.test.mjs` | New on PR #28 | 1 |
+| `urban-paints.test.mjs` | `feat/urban-paints-semaphore-validation-20261114` | 10 |
+| `amaraii-pr109-evidence.test.mjs` | `feat/pr109-semaphore-evidence-readonly-20261113` | 14 |
+| `semaphore-nen.test.mjs` | `feat/nen-pr42-scoped-visual-qa-20261112` | 28 |
+| `semaphore.test.mjs` | Existing from `main`; corrected historical branch-list expectation against v149 | 7 |
+| `live-v149-no-http-commands.test.mjs` | New on PR #28 | 1 |
+| `live-v149-cross-project-gates.test.mjs` | New on PR #28 | 3 |
+
+These files contain **96 named test groups** in total. The complete `bridge/tests/*.test.mjs` glob may include additional existing files from `main`; 96 is **not** a claim about the full-suite test count or pass total. The legacy tests were imported for review, not asserted to pass merely because they parse.
+
+**Review findings and limited execution evidence:**
+- The source snapshot remains byte-identical to live v149 in all seven `bridge/src` modules; all source SHA-256 hash expectations remain unchanged by the test-only additions.
+- JavaScript syntax parsing succeeded for each added test file using a V8 parser with Node import statements excluded; this is **not Node.js test execution**, package resolution, a CI run, or full runtime compatibility proof.
+- Executed the *actual v149 report reader source* inside an isolated JavaScript harness with synthetic provider responses: **four authorized exact-current/previous API/browser report combinations accepted**, and **ten negative/malformed cases rejected**, including wrong project, branch, SHA, pipeline state, named job, job selector, missing artifact, 72/73 report and mismatched report revision. These were not signed real provider responses and do not replay the real CI.
+- Independently exercised the **actual live v149 command validator source** inside the same isolated harness after loading seven modules: exact NEN PR44 policy and Urban bundle paths allowed; wrong SHA, traversal and P3.1 branch CI trigger denied (**5/5** expected decisions).
+- In a separate earlier live bridge read, the **real** P3.1 private sanitized reports were independently retrieved and verified **73/73 QA-Intel API**, **35/35 existing Gather browser**, zero failures at exact P3.1 commit `a374d8ec`. That is application engineering evidence, not execution of PR #28 regression tests.
+
+**Identified and corrected test drift:** `bridge/tests/semaphore.test.mjs` previously expected only two Semaphore branches, while live v149 explicitly allows 11 fixed branch-to-YAML mappings. The test was changed to assert the **exact 11-entry approved source allowlist** (not a broader permissive check). No live code or deployment changed.
+
+**Remaining operational blocker:** `git ls-remote` to GitHub from the current Node 22 container fails because `github.com` cannot be resolved. The connected GitHub plugin can read/edit source but cannot execute repository commands. GitHub Actions usage was previously reported exhausted; this repo has no committed Semaphore pipeline. Therefore **`cd bridge && node --test tests/*.test.mjs` still has not run** on the complete PR #28 checkout. Test execution and an independent review of all historical cross-project changes remain mandatory before merge. Do not use the synthetic checks as a substitute.
+
+**Older PR disposition:** Bridge [draft PR #26](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/26) and [draft PR #27](https://github.com/dev-amaraii/MCP-Cloudflare-circleCI/pull/27) remain open and stacked; their prior changes are represented in the exact live v149 source snapshot, but their review history should remain discoverable. Once PR #28's full tests and independent review pass and a merge is explicitly approved, close older drafts with a documented *superseded by #28* explanation rather than merging stale branches into `main`. **Neither was closed or merged here.**
+
+**No-live-change assertion:** This continuation only changed draft GitHub test files and this record. Cloudflare Worker v149 and its existing bindings, queue configuration, live credentials, authorized actions and production workloads were not modified.
