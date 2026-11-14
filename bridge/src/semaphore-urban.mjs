@@ -53,7 +53,7 @@ async function fetchBundle(signedUrl,requestFn){
       if(!next)throw Error('Urban artifact redirect rejected');
       url=new URL(next,url);continue;
     }
-    if(!response.ok||!response.body)throw Error('Urban artifact download failed');
+    if(!response.ok||!response.body)throw Error('Urban artifact download HTTP '+response.status);
     const announced=Number(response.headers.get('content-length')||0);
     if(!Number.isFinite(announced)||announced>MAX_BUNDLE_BYTES)throw Error('Urban artifact too large');
     const chunks=[],reader=response.body.getReader();let length=0;
