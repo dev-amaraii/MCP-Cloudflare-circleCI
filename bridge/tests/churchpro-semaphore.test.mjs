@@ -513,11 +513,11 @@ test('G4c synthetic PNGs require exact job, approved file and verified manifest'
 });
 
 test('G4d evidence readers accept only exact green source, job and sanitized report', async () => {
-  const pipeline='7f560488-5a76-46c2-b1af-fc2c07012afa';
-  const exact='f1e6c9a299614d83eae53c521af1b30ea1463e14';
+  const pipeline='1d231c7d-9196-4699-9a60-88490af6dbf7';
+  const exact='a7cdeef9eaf386630e4fb7f5ceb338c8f9b31968';
   const branch='codex/churchpro-p2-g4d-record-capabilities-readonly-20261114';
-  const apiJob='eff790d5-c0a0-48cc-b9cb-76535faca26c';
-  const browserJob='458871e1-f51f-4a17-b02c-e98a92fce137';
+  const apiJob='76cb605a-6b3a-4739-876c-f69912a4bb51';
+  const browserJob='4d7fb16d-47f0-4c66-8c78-b05588aa8d9d';
   const validPipeline={ppl_id:pipeline,wf_id:workflowId,project_id:projectId,
     branch_name:branch,commit_sha:exact,state:'done',result:'passed'};
   for(const row of [
@@ -570,10 +570,10 @@ test('G4d evidence readers accept only exact green source, job and sanitized rep
 });
 
 test('G4d PNG reader accepts only three manifest-backed synthetic images', async()=>{
-  const pipeline='7f560488-5a76-46c2-b1af-fc2c07012afa';
-  const exact='f1e6c9a299614d83eae53c521af1b30ea1463e14';
+  const pipeline='1d231c7d-9196-4699-9a60-88490af6dbf7';
+  const exact='a7cdeef9eaf386630e4fb7f5ceb338c8f9b31968';
   const branch='codex/churchpro-p2-g4d-record-capabilities-readonly-20261114';
-  const browserJob='458871e1-f51f-4a17-b02c-e98a92fce137';
+  const browserJob='4d7fb16d-47f0-4c66-8c78-b05588aa8d9d';
   const files=['g4d-editor-record-390.png','g4d-reader-record-320.png','g4d-branch-cell-390.png'];
   const png=new Uint8Array(33);
   png.set([137,80,78,71,13,10,26,10],0); png.set([73,72,68,82],12);
@@ -617,7 +617,7 @@ test('G4d PNG reader accepts only three manifest-backed synthetic images', async
     async()=>{touched++;return response({pipeline:{...base,commit_sha:revision}});}),
     /mismatch/);
   assert.equal(touched,1);
-  for(const wrong of [id,'eff790d5-c0a0-48cc-b9cb-76535faca26c']){
+  for(const wrong of [id,'76cb605a-6b3a-4739-876c-f69912a4bb51']){
     let calls=0;
     await assert.rejects(execute(command('churchpro_png',{pipelineId:pipeline,
       jobId:wrong,artifactPath:'visual-review/'+files[0]}),
