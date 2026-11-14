@@ -73,6 +73,31 @@ const P31_PINNED_FAILED_PIPELINE = Object.freeze({
   pipelineId: 'd176a479-60d4-463d-99e9-7a0a5cdecbb9',
   revision: 'a51325bd11759f076829048523b0e7e112bf1d0e',
 });
+const P31_PINNED_API_FAILURE = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: 'ee3f1bed-710e-4f06-9c47-6624213f8c54',
+  revision: 'afa538d0f6b0d407c57ca66eb3ff669da9ed73da',
+});
+const P31_PINNED_API_ARCH_FAILURE = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: '062efcc2-aabb-4ea6-a3db-68a612344011',
+  revision: '8919917d9e24c40e233c9520fd1031af6f1f8360',
+});
+const P31_PINNED_JEST_FOLLOWUP_FAILURE = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: 'ffcd77e7-f54a-43d2-b7b1-a2677be44336',
+  revision: 'a54347fd39374b56538b4db92270326c491eb1f9',
+});
+const P31_PINNED_QA_MANIFEST_FOLLOWUP_FAILURE = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: 'cfa2fce5-1eae-42c4-aec2-042220b28fbd',
+  revision: 'b142415d8518bd4cc226bcaafe8511dae3ce210a',
+});
+const P31_PINNED_ACCEPTANCE_REVIEW_FAILURE = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: 'cddfd399-352b-49d9-bac9-9689ccd1c276',
+  revision: 'd7cf8424deffc276525ae6c44e39537154113494',
+});
 function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
   if (!pipeline || pipeline.project_id !== expectedId ||
@@ -123,10 +148,32 @@ const G4D_EVIDENCE = Object.freeze({
   ]),
 });
 const EVIDENCE = Object.freeze([G4B_EVIDENCE, G4C_EVIDENCE, G4D_EVIDENCE]);
+// Source-pinned, sanitized JSON review only. NOT authorization for PNGs,
+// raw logs, arbitrary files, successful-run inspect, or future P3.1 pipelines.
+const P31_PINNED_SUCCESS_REPORTS = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: '80f5a3cf-e8dc-454a-999d-820e99d06b62',
+  revision: 'd806877f3532b69223a822ebd0a2131b7a65363a',
+  jobs: Object.freeze({
+    'qa-intel/churchpro/agent-handoff.json': 'Database, authenticated API and strict QA-Intel',
+    'qa-intel/churchpro/gather-browser-handoff.json': 'Authenticated Gather browser and visual review',
+  }),
+});
 function checkedEvidencePipeline(response, expectedId, command) {
   const evidence = EVIDENCE.find(pin => pin.pipelineId === command.pipelineId);
-  const pipeline = checkedPipeline(response, expectedId, evidence
-    ? [evidence.branch] : [CHURCHPRO_SEMAPHORE.branch]);
+  const p31ReportsOnly = command.action === 'churchpro_report' &&
+    command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId;
+  const pipeline = checkedPipeline(response, expectedId, p31ReportsOnly
+    ? [P31_PINNED_SUCCESS_REPORTS.branch]
+    : evidence ? [evidence.branch] : [CHURCHPRO_SEMAPHORE.branch]);
+  if (p31ReportsOnly) {
+    if (pipeline.commit_sha !== P31_PINNED_SUCCESS_REPORTS.revision ||
+        pipeline.state !== 'done' || pipeline.result !== 'passed' ||
+        !Object.hasOwn(P31_PINNED_SUCCESS_REPORTS.jobs, command.artifactPath)) {
+      throw Error('ChurchPro P3.1 pinned green-report identity mismatch');
+    }
+    return pipeline;
+  }
   if (!evidence) return pipeline;
   if (pipeline.commit_sha !== evidence.revision ||
       pipeline.state !== 'done' || pipeline.result !== 'passed') {
@@ -561,7 +608,12 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
     const job = jobs.find(item => item?.job_id === command.jobId);
     if (!job || (EVIDENCE.some(pin => command.pipelineId === pin.pipelineId) &&
-        job.result?.toLowerCase() !== 'passed')) throw Error('ChurchPro QA job ownership mismatch');
+        job.result?.toLowerCase() !== 'passed') ||
+        (command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId &&
+         (job.result?.toLowerCase() !== 'passed' ||
+          job.name !== P31_PINNED_SUCCESS_REPORTS.jobs[command.artifactPath]))) {
+      throw Error('ChurchPro QA job ownership mismatch');
+    }
     const scope = '?scope=jobs&scope_id=' + command.jobId;
     // Semaphore's artifact push job stores the basename at the job root.
     const actualPath = command.artifactPath.slice('qa-intel/churchpro/'.length);
@@ -578,12 +630,19 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       .find(item => item.path === actualPath && typeof item.url === 'string');
     if (!signed) throw Error('QA artifact unavailable');
     const data = await downloadSanitizedReport(signed.url, requestFn);
+    const summary = summaryFromReport(data, command.artifactPath, pipeline.commit_sha);
+    if (command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId &&
+        (summary.status !== 'passed' || summary.passed !== summary.total ||
+         summary.total !== (summary.type === 'qa-intel-api' ? 73 : 35) ||
+         data.productAcceptance !== 'pending_independent_qa_review')) {
+      throw Error('ChurchPro P3.1 report evidence mismatch');
+    }
     return {
       provider: 'semaphore',
       project: 'churchpro',
       pipelineId: command.pipelineId,
       revision: pipeline.commit_sha,
-      ...summaryFromReport(data, command.artifactPath, pipeline.commit_sha),
+      ...summary,
     };
   }
   if (command.action === 'inspect') {
@@ -595,12 +654,15 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       ...CHURCHPRO_INSPECT_ONLY_BRANCHES,
       P31_PINNED_FAILED_PIPELINE.branch,
     ]);
-    // P3.1 exception: one exact failed source/pipeline. Reject before any
-    // detailed workflow or failure log request; preserve all other gates.
+    // P3.1 exceptions: exactly six individually enumerated FAILED source/CI
+    // pairs, never a wildcard branch allowlist or access to later revisions.
+    // Reject before requesting detailed workflow or sanitized provider logs.
+    const p31Allowed = [P31_PINNED_FAILED_PIPELINE, P31_PINNED_API_FAILURE, P31_PINNED_API_ARCH_FAILURE, P31_PINNED_JEST_FOLLOWUP_FAILURE, P31_PINNED_QA_MANIFEST_FOLLOWUP_FAILURE, P31_PINNED_ACCEPTANCE_REVIEW_FAILURE].some(pin =>
+      pin.branch === pipeline.branch_name &&
+      pin.pipelineId === command.pipelineId &&
+      pin.revision === pipeline.commit_sha);
     if (pipeline.branch_name === P31_PINNED_FAILED_PIPELINE.branch &&
-        (command.pipelineId !== P31_PINNED_FAILED_PIPELINE.pipelineId ||
-         pipeline.commit_sha !== P31_PINNED_FAILED_PIPELINE.revision ||
-         pipeline.state !== 'done' || pipeline.result !== 'failed')) {
+        (!p31Allowed || pipeline.state !== 'done' || pipeline.result !== 'failed')) {
       throw Error('ChurchPro P3.1 pinned failure identity mismatch');
     }
     if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId) {
