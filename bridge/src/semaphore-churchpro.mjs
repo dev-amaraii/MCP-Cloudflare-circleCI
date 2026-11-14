@@ -63,6 +63,8 @@ const CHURCHPRO_INSPECT_ONLY_BRANCHES = Object.freeze([
   'codex/churchpro-p2-g4b-private-profile-duplicate-ui-20261113',
   // G4c capability-bound People UI: exact-branch CI inspect only, never trigger or artifacts.
   'codex/churchpro-p2-g4c-person-capabilities-20261114',
+  // G4d scoped Person edit UI; same-project sanitized CI inspect only.
+  'codex/churchpro-p2-g4d-record-capabilities-readonly-20261114',
 ]);
 function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
