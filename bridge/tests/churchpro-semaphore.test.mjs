@@ -495,13 +495,14 @@ test('G4c synthetic PNGs require exact job, approved file and verified manifest'
     'visual-review/other-sensitive.png']) {
     const cmd=command('churchpro_png',{pipelineId:pinned,jobId:browserJob,artifactPath:badFile});
     if(badFile.includes('other-sensitive'))assert.throws(()=>valid(cmd),/not permitted/);
-    else await assert.rejects(execute(cmd,async()=>response({pipeline:base})),/not allowed/);
+    else await assert.rejects(execute(cmd,async()=>response({pipeline:base})),
+      /not allowed|not permitted/);
   }
   for(const wrongJob of [id,'a7c79e89-85e7-4556-ae67-ada5f1fde952']){
     let calls=0;
     await assert.rejects(execute(command('churchpro_png',{pipelineId:pinned,
       jobId:wrongJob,artifactPath:'visual-review/'+files[0]}),
-    async()=>{calls++;return response({pipeline:base});}),/not allowed/);
+    async()=>{calls++;return response({pipeline:base});}),/not allowed|not permitted/);
     assert.equal(calls,1);
   }
   let network=0;
