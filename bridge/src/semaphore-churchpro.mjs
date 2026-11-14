@@ -89,27 +89,39 @@ const G4B_EVIDENCE = Object.freeze({
     'g4b-person-tasks-320.png',
   ]),
 });
+// G4c: a single successfully completed disposable QA run, synthetic-only.
+const G4C_EVIDENCE = Object.freeze({
+  pipelineId: 'a9b6c056-91bc-49cd-b619-17de2aa6efac',
+  revision: '6a2a3e319c6c1c3d7afc305e2c855c253d18fcbb',
+  branch: 'codex/churchpro-p2-g4c-person-capabilities-20261114',
+  apiJob: 'a7c79e89-85e7-4556-ae67-ada5f1fde952',
+  browserJob: '6c915990-ba7b-4ea7-ad43-62379accf03a',
+  screenshots: Object.freeze([
+    'g4c-owner-actions-390.png', 'g4c-basic-actions-hidden-390.png',
+  ]),
+});
+const EVIDENCE = Object.freeze([G4B_EVIDENCE, G4C_EVIDENCE]);
 function checkedEvidencePipeline(response, expectedId, command) {
-  const pinned = command.pipelineId === G4B_EVIDENCE.pipelineId;
-  const pipeline = checkedPipeline(response, expectedId, pinned
-    ? [G4B_EVIDENCE.branch] : [CHURCHPRO_SEMAPHORE.branch]);
-  if (!pinned) return pipeline;
-  if (pipeline.commit_sha !== G4B_EVIDENCE.revision ||
+  const evidence = EVIDENCE.find(pin => pin.pipelineId === command.pipelineId);
+  const pipeline = checkedPipeline(response, expectedId, evidence
+    ? [evidence.branch] : [CHURCHPRO_SEMAPHORE.branch]);
+  if (!evidence) return pipeline;
+  if (pipeline.commit_sha !== evidence.revision ||
       pipeline.state !== 'done' || pipeline.result !== 'passed') {
     throw Error('ChurchPro pinned evidence revision or success mismatch');
   }
   if (command.action === 'churchpro_png' &&
-      (command.jobId !== G4B_EVIDENCE.browserJob ||
-       !G4B_EVIDENCE.screenshots.includes(command.artifactPath?.slice('visual-review/'.length)))) {
+      (command.jobId !== evidence.browserJob ||
+       !evidence.screenshots.includes(command.artifactPath?.slice('visual-review/'.length)))) {
     throw Error('ChurchPro pinned PNG job or path not allowed');
   }
   if (command.action === 'churchpro_report' &&
       command.jobId !== (command.artifactPath === 'qa-intel/churchpro/agent-handoff.json'
-        ? G4B_EVIDENCE.apiJob : G4B_EVIDENCE.browserJob)) {
+        ? evidence.apiJob : evidence.browserJob)) {
     throw Error('ChurchPro pinned QA report job mismatch');
   }
   if (command.action === 'churchpro_artifact_probe' &&
-      ![G4B_EVIDENCE.apiJob, G4B_EVIDENCE.browserJob].includes(command.jobId)) {
+      ![evidence.apiJob, evidence.browserJob].includes(command.jobId)) {
     throw Error('ChurchPro pinned QA artifact job mismatch');
   }
   return pipeline;
@@ -357,8 +369,8 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       ? command.artifactPath.slice('visual-review/'.length) : '';
     if (!UUID.test(command.pipelineId ?? '') || !UUID.test(command.jobId ?? '') ||
         !(allowed.test(file) ||
-          (command.pipelineId === G4B_EVIDENCE.pipelineId &&
-           G4B_EVIDENCE.screenshots.includes(file)))) {
+          EVIDENCE.some(pin => command.pipelineId === pin.pipelineId &&
+            pin.screenshots.includes(file)))) {
       throw Error('ChurchPro PNG access not permitted');
     }
     const base = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
@@ -526,7 +538,7 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     const jobs = (Array.isArray(details.blocks) ? details.blocks : [])
       .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
     const job = jobs.find(item => item?.job_id === command.jobId);
-    if (!job || (command.pipelineId === G4B_EVIDENCE.pipelineId &&
+    if (!job || (EVIDENCE.some(pin => command.pipelineId === pin.pipelineId) &&
         job.result?.toLowerCase() !== 'passed')) throw Error('ChurchPro QA job ownership mismatch');
     const scope = '?scope=jobs&scope_id=' + command.jobId;
     // Semaphore's artifact push job stores the basename at the job root.
