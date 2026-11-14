@@ -1409,6 +1409,71 @@ test('sixth pinned P3.1 pre-acceptance failed pipeline is read-only and fails cl
 });
 
 
+test('seventh pinned P3.1 five-gap failed pipeline is read-only and fails closed', async () => {
+  const pinned = '505f9d7d-b38c-41f7-8d7f-dadfd4c4caa9';
+  const exact = 'b8b19d235b24c4280bedafa3ca2fc89aed665893';
+  const branch = 'codex/churchpro-p3-p31-manual-sessions-20261114';
+  const jobId = 'aaaaaaaa-bbbb-4ccc-8ddd-123456789025';
+  const pipeline = {
+    ppl_id: pinned, wf_id: workflowId, project_id: projectId,
+    branch_name: branch, commit_sha: exact, state: 'done', result: 'failed',
+  };
+  const visited = [];
+  const inspection = await execute(command('inspect', { pipelineId: pinned }), async url => {
+    visited.push(url);
+    if (url.endsWith('/pipelines/' + pinned)) return response({ pipeline });
+    if (url.endsWith('/pipelines/' + pinned + '?detailed=true')) return response({
+      pipeline, blocks: [{
+        name: 'Disposable PostgreSQL and agent QA', state: 'done', result: 'failed',
+        jobs: [{ job_id: jobId, name: 'Database, authenticated API and strict QA-Intel',
+          status: 'finished', result: 'failed' }],
+      }],
+    });
+    if (url.endsWith('/logs/' + jobId)) return response({ events: [
+      { event: 'cmd_started', directive: 'corepack pnpm --filter "@churchpro/api" test' },
+      { event: 'cmd_output', output: 'synthetic regression failure\nAuthorization: private-qa-fixture' },
+      { event: 'cmd_finished', exit_code: 1 },
+    ] });
+    throw Error('Unexpected CI endpoint');
+  });
+  assert.equal(inspection.vcs.branch, branch);
+  assert.equal(inspection.vcs.revision, exact);
+  assert.equal(inspection.failure.jobId, jobId);
+  assert.equal(inspection.failure.exitCode, 1);
+  assert.match(JSON.stringify(inspection.failure), /synthetic regression failure/);
+  assert.doesNotMatch(JSON.stringify(inspection), /private-qa-fixture|Authorization:/);
+  assert.equal(visited.length, 3);
+
+  for (const changes of [
+    { commit_sha: 'a'.repeat(40) }, { branch_name: 'main' },
+    { project_id: otherProjectId }, { state: 'running' }, { result: 'passed' },
+  ]) {
+    let count = 0;
+    await assert.rejects(execute(command('inspect', { pipelineId: pinned }), async () => {
+      count++;
+      return response({ pipeline: { ...pipeline, ...changes } });
+    }), /mismatch|branch/i);
+    assert.equal(count, 1);
+  }
+  const unpinned = 'dddddddd-bbbb-4ccc-8ddd-999999999999';
+  let calls = 0;
+  await assert.rejects(execute(command('inspect', { pipelineId: unpinned }), async () => {
+    calls++;
+    return response({ pipeline: { ...pipeline, ppl_id: unpinned } });
+  }), /pinned failure identity mismatch/);
+  assert.equal(calls, 1);
+  assert.throws(() => valid(command('trigger', {
+    branch, commitSha: exact, mode: 'validation',
+  })), /Branch not permitted/);
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId: pinned, jobId, artifactPath: 'qa-intel/churchpro/agent-handoff.json',
+  }), async () => response({ pipeline })), /ownership mismatch/);
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId: pinned, jobId,
+  }), async () => response({ pipeline })), /ownership mismatch|not permitted/);
+});
+
+
 test('P3.1 exact-green sanitized handoff access is restricted to two owned jobs and reports', async () => {
   const pinned = '80f5a3cf-e8dc-454a-999d-820e99d06b62';
   const pinnedJobSelector = '00000000-0000-4000-8000-000000000001';
