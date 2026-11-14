@@ -64,3 +64,31 @@ test('bundle rejects untrusted signed hosts',async()=>{
     throw Error('Should not fetch untrusted host');
   }),/Unsafe Urban artifact URL/);
 });
+
+test('scoped diagnostics reports only a scrubbed failed command',async()=>{
+ const jobId='e69cb5f6-703a-4ee5-8c68-54d1bfc1dd89';
+ let calls=0;
+ const r=await executeSemaphoreUrban(env,cmd('urban_diagnostics',{pipelineId,jobId,branch:URBAN_SEMAPHORE.branch,commitSha:sha}),async url=>{
+  calls++;
+  if(url.endsWith('/pipelines/'+pipelineId))return ok({pipeline:{project_id:id,ppl_id:pipelineId,branch_name:URBAN_SEMAPHORE.branch,commit_sha:sha,state:'done',result:'failed'}});
+  if(url.includes('?detailed=true'))return ok({pipeline:{project_id:id},blocks:[{jobs:[{job_id:jobId,name:'Typecheck, build and browser QA',result:'failed'}]}]});
+  if(url.endsWith('/logs/'+jobId))return ok({events:[
+   {event:'cmd_started',directive:'npm run build'},
+   {event:'cmd_output',output:'app/page.tsx(15): error TS2322: Something expected\\nToken secret=abcd\\n'},
+   {event:'cmd_finished',exit_code:1}
+  ]});
+  throw Error('unexpected URL');
+ });
+ assert.equal(calls,3);
+ assert.equal(r.failedCommand,'npm run build');
+ assert.equal(r.exitCode,1);
+ assert.ok(r.diagnosticLines.some(x=>x.includes('TS2322')));
+ assert.equal(JSON.stringify(r).includes('abcd'),false);
+});
+test('diagnostics refuses a foreign failed job',async()=>{
+ const jobId='e69cb5f6-703a-4ee5-8c68-54d1bfc1dd89';
+ await assert.rejects(executeSemaphoreUrban(env,cmd('urban_diagnostics',{pipelineId,jobId,branch:URBAN_SEMAPHORE.branch,commitSha:sha}),async url=>{
+  if(url.endsWith('/pipelines/'+pipelineId))return ok({pipeline:{project_id:id,ppl_id:pipelineId,branch_name:URBAN_SEMAPHORE.branch,commit_sha:sha,state:'done',result:'failed'}});
+  return ok({pipeline:{project_id:id},blocks:[{jobs:[{job_id:jobId,name:'Other project job',result:'failed'}]}]});
+ }),/job not owned/);
+});
