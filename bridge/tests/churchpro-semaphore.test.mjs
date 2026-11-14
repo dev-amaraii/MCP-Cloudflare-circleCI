@@ -990,3 +990,77 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
   }), async () => response(basic)), /ownership mismatch/,
   'PR #20 must not acquire PR #18 artifact access');
 });
+
+test('P3.1 failed-source diagnostic is pinned to one pipeline without trigger or artifact access', async () => {
+  const pinned = 'd176a479-60d4-463d-99e9-7a0a5cdecbb9';
+  const exact = 'a51325bd11759f076829048523b0e7e112bf1d0e';
+  const branch = 'codex/churchpro-p3-p31-manual-sessions-20261114';
+  const jobId = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+  const base = {
+    ppl_id: pinned, wf_id: workflowId, project_id: projectId,
+    branch_name: branch, commit_sha: exact, state: 'done', result: 'failed',
+  };
+  const urls = [];
+  const result = await execute(command('inspect', { pipelineId: pinned }), async url => {
+    urls.push(url);
+    if (url.endsWith('/pipelines/' + pinned)) return response({ pipeline: base });
+    if (url.endsWith('/pipelines/' + pinned + '?detailed=true')) return response({
+      pipeline: base,
+      blocks: [{
+        name: 'Disposable PostgreSQL and agent QA', state: 'done', result: 'failed',
+        jobs: [{ job_id: jobId, name: 'Database, authenticated API and strict QA-Intel',
+          status: 'finished', result: 'failed' }],
+      }],
+    });
+    if (url.endsWith('/logs/' + jobId)) return response({
+      events: [
+        { event: 'cmd_started',
+          directive: 'corepack pnpm --filter "@churchpro/database" test:integration' },
+        { event: 'cmd_output', output: 'error: synthetic migration failed\nToken: example-secret' },
+        { event: 'cmd_finished', exit_code: 1 },
+      ],
+    });
+    throw Error('Unexpected request');
+  });
+  assert.equal(result.provider, 'semaphore');
+  assert.equal(result.vcs.branch, branch);
+  assert.equal(result.vcs.revision, exact);
+  assert.equal(result.failure.jobId, jobId);
+  assert.equal(result.failure.exitCode, 1);
+  assert.match(result.failure.diagnosticLines.join(' '), /synthetic migration failed/);
+  assert.doesNotMatch(JSON.stringify(result), /example-secret|Token:/);
+  assert.equal(urls.length, 3);
+
+  // The identity check stops unauthorized requests at the first project-bound
+  // pipeline fetch; no detailed workflow or provider logs are downloaded.
+  for (const wrong of [
+    { ...base, commit_sha: 'b'.repeat(40) },
+    { ...base, state: 'running' },
+    { ...base, result: 'passed' },
+    { ...base, project_id: otherProjectId },
+  ]) {
+    let calls = 0;
+    await assert.rejects(execute(command('inspect', { pipelineId: pinned }), async () => {
+      calls++;
+      return response({ pipeline: wrong });
+    }), /mismatch/);
+    assert.equal(calls, 1);
+  }
+  const otherPipeline = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
+  let otherCalls = 0;
+  await assert.rejects(execute(command('inspect', { pipelineId: otherPipeline }), async () => {
+    otherCalls++;
+    return response({ pipeline: { ...base, ppl_id: otherPipeline } });
+  }), /pinned failure identity mismatch/);
+  assert.equal(otherCalls, 1);
+
+  assert.throws(() => valid(command('trigger', {
+    branch, commitSha: exact, mode: 'validation',
+  })), /Branch not permitted/);
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId: pinned, jobId, artifactPath: 'qa-intel/churchpro/agent-handoff.json',
+  }), async () => response({ pipeline: base })), /ownership mismatch/);
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId: pinned, jobId,
+  }), async () => response({ pipeline: base })), /ownership mismatch/);
+});
