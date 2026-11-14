@@ -512,6 +512,120 @@ test('G4c synthetic PNGs require exact job, approved file and verified manifest'
   assert.equal(network,1);
 });
 
+test('G4d evidence readers accept only exact green source, job and sanitized report', async () => {
+  const pipeline='7f560488-5a76-46c2-b1af-fc2c07012afa';
+  const exact='f1e6c9a299614d83eae53c521af1b30ea1463e14';
+  const branch='codex/churchpro-p2-g4d-record-capabilities-readonly-20261114';
+  const apiJob='eff790d5-c0a0-48cc-b9cb-76535faca26c';
+  const browserJob='458871e1-f51f-4a17-b02c-e98a92fce137';
+  const validPipeline={ppl_id:pipeline,wf_id:workflowId,project_id:projectId,
+    branch_name:branch,commit_sha:exact,state:'done',result:'passed'};
+  for(const row of [
+    {job:apiJob,path:'qa-intel/churchpro/agent-handoff.json',type:'qa-intel-api',
+      data:{schemaVersion:1,project:'churchpro',product:'ChurchPro',revision:exact,
+        evidenceStatus:'passed',checks:[{intent:'synthetic',status:'passed'}]}},
+    {job:browserJob,path:'qa-intel/churchpro/gather-browser-handoff.json',type:'gather-browser',
+      data:{sourceSha:exact,evidence:'disposable-real-postgresql-nest-browser',
+        status:'passed',cases:[{id:'synthetic_browser',status:'passed'}]}},
+  ]){
+    const stored=row.path.split('/').at(-1);
+    const answer=await execute(command('churchpro_report',{
+      pipelineId:pipeline,jobId:row.job,artifactPath:row.path,
+    }), async url=>{
+      if(url.endsWith('/pipelines/'+pipeline))return response({pipeline:validPipeline});
+      if(url.endsWith('?detailed=true'))return response({
+        pipeline:{wf_id:workflowId,branch_name:branch},
+        blocks:[{jobs:[{job_id:row.job,result:'passed'}]}]});
+      if(url.includes('/artifacts/signed_url'))return response({items:[
+        {path:stored,url:'https://storage.googleapis.com/synthetic/'+stored+'?sig=never-return'}]});
+      if(url.includes('/artifacts?'))return response({artifacts:[
+        {path:stored,is_directory:false,size:180}]});
+      if(url.includes('storage.googleapis.com'))return response(row.data);
+      throw Error('Unexpected upstream');
+    });
+    assert.equal(answer.revision,exact);
+    assert.equal(answer.type,row.type);
+    assert.equal(answer.total,1);
+    assert.equal(answer.passed,1);
+    assert.equal(JSON.stringify(answer).includes('never-return'),false);
+    assert.equal(JSON.stringify(answer).includes(env.SEMAPHORE_TOKEN),false);
+  }
+  for(const invalid of [
+    {...validPipeline,commit_sha:revision},
+    {...validPipeline,project_id:otherProjectId},
+    {...validPipeline,branch_name:'main'},
+    {...validPipeline,result:'failed'},
+  ]){
+    let calls=0;
+    await assert.rejects(execute(command('churchpro_report',{pipelineId:pipeline,
+      jobId:apiJob,artifactPath:'qa-intel/churchpro/agent-handoff.json'}),
+    async()=>{calls++;return response({pipeline:invalid});}),/mismatch/);
+    assert.equal(calls,1,'Wrong source rejected before touching job artifacts');
+  }
+  await assert.rejects(execute(command('churchpro_report',{pipelineId:pipeline,
+    jobId:browserJob,artifactPath:'qa-intel/churchpro/agent-handoff.json'}),
+    async()=>response({pipeline:validPipeline})),/mismatch/);
+  assert.throws(()=>valid(command('trigger',{branch,commitSha:exact,mode:'validation'})),
+    /Branch not permitted/);
+});
+
+test('G4d PNG reader accepts only three manifest-backed synthetic images', async()=>{
+  const pipeline='7f560488-5a76-46c2-b1af-fc2c07012afa';
+  const exact='f1e6c9a299614d83eae53c521af1b30ea1463e14';
+  const branch='codex/churchpro-p2-g4d-record-capabilities-readonly-20261114';
+  const browserJob='458871e1-f51f-4a17-b02c-e98a92fce137';
+  const files=['g4d-editor-record-390.png','g4d-reader-record-320.png','g4d-branch-cell-390.png'];
+  const png=new Uint8Array(33);
+  png.set([137,80,78,71,13,10,26,10],0); png.set([73,72,68,82],12);
+  new DataView(png.buffer).setUint32(16,390);
+  new DataView(png.buffer).setUint32(20,844);
+  const base={ppl_id:pipeline,wf_id:workflowId,project_id:projectId,
+    branch_name:branch,commit_sha:exact,state:'done',result:'passed'};
+  for(const file of files){
+    const path='visual-review/'+file;
+    const answer=await execute(command('churchpro_png',{pipelineId:pipeline,
+      jobId:browserJob,artifactPath:path}),async url=>{
+      if(url.endsWith('/pipelines/'+pipeline))return response({pipeline:base});
+      if(url.endsWith('?detailed=true'))return response({
+        pipeline:{wf_id:workflowId,branch_name:branch},
+        blocks:[{jobs:[{job_id:browserJob,result:'passed'}]}]});
+      if(url.includes('/artifacts/signed_url')){
+        const target=url.includes('manifest.json')?'visual-review/manifest.json':path;
+        return response({items:[{path:target,url:'https://storage.googleapis.com/synthetic/'+
+          (target.endsWith('.png')?'example.png':'manifest.json')+'?sig=private'}]});
+      }
+      if(url.includes('/artifacts?'))return response({artifacts:[
+        {path,is_directory:false,size:png.length},
+        {path:'visual-review/manifest.json',is_directory:false,size:240}]});
+      if(url.includes('storage.googleapis.com')&&url.includes('example.png'))
+        return new Response(png,{status:200,headers:{'Content-Type':'image/png'}});
+      if(url.includes('storage.googleapis.com'))return response({
+        sourceSha:exact,fixture:'disposable-synthetic',status:'passed',files});
+      throw Error('Unexpected upstream');
+    });
+    assert.equal(answer.revision,exact);
+    assert.equal(answer.width,390);
+    assert.equal(answer.path,path);
+    assert.equal(JSON.stringify(answer).includes('sig=private'),false);
+  }
+  await assert.rejects(execute(command('churchpro_png',{pipelineId:pipeline,
+    jobId:browserJob,artifactPath:'visual-review/g4c-owner-actions-390.png'}),
+    async()=>response({pipeline:base})),/not allowed|not permitted/);
+  let touched=0;
+  await assert.rejects(execute(command('churchpro_png',{pipelineId:pipeline,
+    jobId:browserJob,artifactPath:'visual-review/'+files[0]}),
+    async()=>{touched++;return response({pipeline:{...base,commit_sha:revision}});}),
+    /mismatch/);
+  assert.equal(touched,1);
+  for(const wrong of [id,'eff790d5-c0a0-48cc-b9cb-76535faca26c']){
+    let calls=0;
+    await assert.rejects(execute(command('churchpro_png',{pipelineId:pipeline,
+      jobId:wrong,artifactPath:'visual-review/'+files[0]}),
+      async()=>{calls++;return response({pipeline:base});}),/not allowed|not permitted/);
+    assert.equal(calls,1);
+  }
+});
+
 test('ChurchPro report reader rejects unsigned and foreign artifact locations', async () => {
   const path = 'qa-intel/churchpro/gather-browser-handoff.json';
   const stored = 'gather-browser-handoff.json';
