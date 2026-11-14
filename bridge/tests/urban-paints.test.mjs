@@ -35,3 +35,32 @@ test('inspection returns bounded and sanitised results only',async()=>{
   });
   assert.equal(result.vcs.revision,sha);assert.equal(result.blocks[0].jobs[0].result,'passed');
 });
+
+test('bundle download requires proven passed pipeline, exact path and trusted host',async()=>{
+  let calls=0;
+  const cmdBundle=cmd('urban_preview_bundle',{pipelineId,branch:URBAN_SEMAPHORE.branch,commitSha:sha,artifactPath:'preview-bundle/urban-paints-preview.tgz'});
+  const bytes=new Uint8Array([31,139,8,0,1,2,3,4,5,6,7,8,9,10]);
+  const fetchMock=async(url)=>{
+    calls++;
+    if(url.includes('/pipelines/'))return ok({pipeline:{project_id:id,ppl_id:pipelineId,wf_id:workflowId,branch_name:URBAN_SEMAPHORE.branch,commit_sha:sha,state:'done',result:'passed'}});
+    if(url.includes('/artifacts/signed_url'))return ok({items:[{path:'preview-bundle/urban-paints-preview.tgz',url:'https://storage.googleapis.com/test/urban-preview.tar.gz?signature=synthetic'}]});
+    if(url.startsWith('https://storage.googleapis.com/'))return new Response(bytes,{status:200,headers:{'content-type':'application/octet-stream'}});
+    throw Error('Unexpected fetch path');
+  };
+  const result=await executeSemaphoreUrban(env,cmdBundle,fetchMock);
+  assert.equal(calls,3);assert.equal(result.bytes,bytes.length);
+  assert.equal(result.encoding,'gzip+tar');
+  assert.equal(JSON.stringify(result).includes('signature='),false);
+});
+test('bundle cannot be obtained from foreign pipeline',async()=>{
+  const bundle=cmd('urban_preview_bundle',{pipelineId,branch:URBAN_SEMAPHORE.branch,commitSha:sha,artifactPath:'preview-bundle/urban-paints-preview.tgz'});
+  await assert.rejects(executeSemaphoreUrban(env,bundle,async()=>ok({pipeline:{project_id:workflowId,ppl_id:pipelineId,wf_id:workflowId,state:'done',result:'passed'}})),/provenance mismatch/);
+});
+test('bundle rejects untrusted signed hosts',async()=>{
+  const bundle=cmd('urban_preview_bundle',{pipelineId,branch:URBAN_SEMAPHORE.branch,commitSha:sha,artifactPath:'preview-bundle/urban-paints-preview.tgz'});
+  await assert.rejects(executeSemaphoreUrban(env,bundle,async(url)=>{
+    if(url.includes('/pipelines/'))return ok({pipeline:{project_id:id,ppl_id:pipelineId,wf_id:workflowId,branch_name:URBAN_SEMAPHORE.branch,commit_sha:sha,state:'done',result:'passed'}});
+    if(url.includes('/artifacts/signed_url'))return ok({items:[{path:'preview-bundle/urban-paints-preview.tgz',url:'https://evil.example/asset'}]});
+    throw Error('Should not fetch untrusted host');
+  }),/Unsafe Urban artifact URL/);
+});
