@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+
+const liveV149 = Object.freeze({
+  'amaraii-pr109-evidence.mjs': ['5854fc3c66c2ea55ab39ff087c1f66eb3f18c719cf67e9cee7768d808072dcc7', 11189],
+  'index.mjs': ['b86d6616eb6a4ee2bfc278b83d8eda3158765d56e009b10436d60103bed6f3df', 58111],
+  'provider-routing.mjs': ['89d798f3e30359a51e77254f60895c778ef927e7ca66d7d69bfe4c72b6e51ef8', 1497],
+  'semaphore-churchpro.mjs': ['1ce8c0927ce67ba7a3cd6ede09dae08f19733684e896099ed58bf44d60f517c8', 37267],
+  'semaphore-nen.mjs': ['9510b775703487be16f57cd8078abd72ff791c4862050becfdb6d99b954ca1f8', 19997],
+  'semaphore-urban.mjs': ['29c17c06cc49de3f14b5993732e2392e0e693137954b48d499de34a4a12e4ac6', 13247],
+  'semaphore.mjs': ['39dee9d34f2470a0e6432f06f1bbc6eaa380300c7a7bc489fae1cb39c16fbd84', 19791],
+});
+
+test('checked-in bridge modules remain byte-identical to deployed Cloudflare v149', async () => {
+  assert.equal(Object.keys(liveV149).length, 7);
+  for (const [filename, [digest, bytes]] of Object.entries(liveV149)) {
+    const source = await readFile(new URL('../src/' + filename, import.meta.url));
+    const actual = createHash('sha256').update(source).digest('hex');
+    assert.equal(source.byteLength, bytes, filename + ': byte length drift');
+    assert.equal(actual, digest, filename + ': deployed v149 source SHA-256 drift');
+  }
+});
