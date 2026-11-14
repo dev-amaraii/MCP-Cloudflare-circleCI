@@ -1207,3 +1207,72 @@ test('third pinned P3.1 architecture follow-up is exact-source read-only and den
     artifactPath: 'qa-intel/churchpro/agent-handoff.json',
   }), async () => response({ pipeline: expected })), /ownership mismatch/);
 });
+
+
+test('fourth pinned P3.1 Jest follow-up accepts only exact failed-source read-only inspect', async () => {
+  const pinned = 'ffcd77e7-f54a-43d2-b7b1-a2677be44336';
+  const exact = 'a54347fd39374b56538b4db92270326c491eb1f9';
+  const branch = 'codex/churchpro-p3-p31-manual-sessions-20261114';
+  const job = 'aaaaaaaa-bbbb-4ccc-8ddd-123456789013';
+  const expected = {
+    ppl_id: pinned, wf_id: workflowId, project_id: projectId,
+    branch_name: branch, commit_sha: exact, state: 'done', result: 'failed',
+  };
+  const visited = [];
+  const result = await execute(command('inspect', { pipelineId: pinned }), async url => {
+    visited.push(url);
+    if (url.endsWith('/pipelines/' + pinned)) return response({ pipeline: expected });
+    if (url.endsWith('/pipelines/' + pinned + '?detailed=true')) return response({
+      pipeline: expected, blocks: [{
+        name: 'Disposable PostgreSQL and agent QA', state: 'done', result: 'failed',
+        jobs: [{ job_id: job, name: 'API test', status: 'finished', result: 'failed' }],
+      }],
+    });
+    if (url.endsWith('/logs/' + job)) return response({ events: [
+      { event: 'cmd_started', directive: 'corepack pnpm --filter "@churchpro/api" test' },
+      { event: 'cmd_output', output: 'synthetic test failure\nAuthorization: deny-this-test-secret' },
+      { event: 'cmd_finished', exit_code: 1 },
+    ] });
+    throw Error('Unexpected CI API request');
+  });
+  assert.equal(result.vcs.revision, exact);
+  assert.equal(result.vcs.branch, branch);
+  assert.equal(result.failure.jobId, job);
+  assert.equal(result.failure.exitCode, 1);
+  assert.match(JSON.stringify(result.failure), /synthetic test failure/);
+  assert.doesNotMatch(JSON.stringify(result), /deny-this-test-secret|Authorization:/);
+  assert.equal(visited.length, 3);
+
+  for (const bad of [
+    { commit_sha: 'a'.repeat(40) },
+    { project_id: otherProjectId },
+    { branch_name: 'main' },
+    { result: 'passed' },
+    { state: 'running' },
+  ]) {
+    let calls = 0;
+    await assert.rejects(execute(command('inspect', { pipelineId: pinned }), async () => {
+      calls++;
+      return response({ pipeline: { ...expected, ...bad } });
+    }), /mismatch|branch/i);
+    assert.equal(calls, 1);
+  }
+
+  const unauthorizedPipeline = 'aaaaaaaa-bbbb-4ccc-8ddd-888888888888';
+  let calls = 0;
+  await assert.rejects(execute(command('inspect', { pipelineId: unauthorizedPipeline }), async () => {
+    calls++;
+    return response({ pipeline: { ...expected, ppl_id: unauthorizedPipeline } });
+  }), /pinned failure identity mismatch/);
+  assert.equal(calls, 1);
+  assert.throws(() => valid(command('trigger', {
+    branch, commitSha: exact, mode: 'validation',
+  })), /Branch not permitted/);
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId: pinned, jobId: job,
+  }), async () => response({ pipeline: expected })), /ownership mismatch|not permitted/);
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId: pinned, jobId: job,
+    artifactPath: 'qa-intel/churchpro/agent-handoff.json',
+  }), async () => response({ pipeline: expected })), /ownership mismatch/);
+});
