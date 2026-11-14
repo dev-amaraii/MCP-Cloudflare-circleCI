@@ -8,6 +8,7 @@
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import { executeSemaphoreUrban, URBAN_SEMAPHORE } from './semaphore-urban.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -158,6 +159,7 @@ async function downloadChurchproReport(env, urlValue, requestFn = fetch) {
 }
 
 export const PROJECTS = Object.freeze({
+  'urban-design-paint': Object.freeze({branches:[],modes:Object.freeze({})}),
   churchpro: Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu',
     // Resolve the existing GitHub App definition by identity; never guess an ID.
@@ -212,8 +214,10 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (!['circleci','semaphore','auto'].includes(provider)) throw new Error('CI provider not permitted');
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
-  if (provider === 'semaphore' &&
-      (command.project !== 'amaraii-os' || !['health','trigger','inspect'].includes(command.action))) {
+  if (command.project === 'urban-design-paint' && provider !== 'semaphore') throw new Error('Urban Paints is Semaphore-only');
+  if (provider === 'semaphore' && !(
+      ['amaraii-os','urban-design-paint'].includes(command.project) &&
+      ['health','trigger','inspect'].includes(command.action))) {
     throw new Error('Semaphore action not permitted');
   }
   if (command.action === 'health') {
@@ -231,7 +235,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
       if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha))
         throw new Error('Invalid automatic CI revision');
     }
-    const branches = provider === 'semaphore' ? SEMAPHORE_BRANCHES : project.branches;
+    const branches = provider === 'semaphore' ? (command.project === 'urban-design-paint' ? [URBAN_SEMAPHORE.branch] : SEMAPHORE_BRANCHES) : project.branches;
     if (typeof command.branch !== 'string' || !branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (provider === 'semaphore') {
       if (command.mode !== 'validation') throw new Error('Pipeline mode not permitted');
@@ -388,7 +392,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return {...result,provider:'circleci',requestedRevision:command.commitSha,
       revisionVerificationRequired:true,selectionReason:selection.reason};
   }
-  if (command.provider === 'semaphore') return executeSemaphore(env, command, requestFn);
+  if (command.provider === 'semaphore') return command.project === 'urban-design-paint' ? executeSemaphoreUrban(env,command,requestFn) : executeSemaphore(env,command,requestFn);
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',
