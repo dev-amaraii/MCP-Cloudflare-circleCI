@@ -83,6 +83,11 @@ const P31_PINNED_API_ARCH_FAILURE = Object.freeze({
   pipelineId: '062efcc2-aabb-4ea6-a3db-68a612344011',
   revision: '8919917d9e24c40e233c9520fd1031af6f1f8360',
 });
+const P31_PINNED_JEST_FOLLOWUP_FAILURE = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: 'ffcd77e7-f54a-43d2-b7b1-a2677be44336',
+  revision: 'a54347fd39374b56538b4db92270326c491eb1f9',
+});
 function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
   if (!pipeline || pipeline.project_id !== expectedId ||
@@ -605,10 +610,10 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       ...CHURCHPRO_INSPECT_ONLY_BRANCHES,
       P31_PINNED_FAILED_PIPELINE.branch,
     ]);
-    // P3.1 exceptions: exactly three individually enumerated FAILED source/CI
+    // P3.1 exceptions: exactly four individually enumerated FAILED source/CI
     // pairs, never a wildcard branch allowlist or access to later revisions.
     // Reject before requesting detailed workflow or sanitized provider logs.
-    const p31Allowed = [P31_PINNED_FAILED_PIPELINE, P31_PINNED_API_FAILURE, P31_PINNED_API_ARCH_FAILURE].some(pin =>
+    const p31Allowed = [P31_PINNED_FAILED_PIPELINE, P31_PINNED_API_FAILURE, P31_PINNED_API_ARCH_FAILURE, P31_PINNED_JEST_FOLLOWUP_FAILURE].some(pin =>
       pin.branch === pipeline.branch_name &&
       pin.pipelineId === command.pipelineId &&
       pin.revision === pipeline.commit_sha);
