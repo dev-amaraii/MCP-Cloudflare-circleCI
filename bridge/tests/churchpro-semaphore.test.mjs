@@ -1064,3 +1064,71 @@ test('P3.1 failed-source diagnostic is pinned to one pipeline without trigger or
     pipelineId: pinned, jobId,
   }), async () => response({ pipeline: base })), /ownership mismatch/);
 });
+
+test('second pinned P3.1 API failure has exact source/job and no cross-pipeline access', async () => {
+  const pinned = 'ee3f1bed-710e-4f06-9c47-6624213f8c54';
+  const exact = 'afa538d0f6b0d407c57ca66eb3ff669da9ed73da';
+  const branch = 'codex/churchpro-p3-p31-manual-sessions-20261114';
+  const job = 'eeeeeeee-aaaa-4bbb-8ccc-123456789012';
+  const allowed = {
+    ppl_id: pinned, wf_id: workflowId, project_id: projectId,
+    branch_name: branch, commit_sha: exact, state: 'done', result: 'failed',
+  };
+  const visited = [];
+  const inspection = await execute(command('inspect', { pipelineId: pinned }), async url => {
+    visited.push(url);
+    if (url.endsWith('/pipelines/' + pinned)) return response({ pipeline: allowed });
+    if (url.endsWith('/pipelines/' + pinned + '?detailed=true')) return response({
+      pipeline: allowed, blocks: [{
+        name: 'Disposable PostgreSQL and agent QA', state: 'done', result: 'failed',
+        jobs: [{ job_id: job, name: 'P3.1 API test', status: 'finished', result: 'failed' }],
+      }],
+    });
+    if (url.endsWith('/logs/' + job)) return response({ events: [
+      { event: 'cmd_started', directive: 'corepack pnpm --filter "@churchpro/api" test' },
+      { event: 'cmd_output', output: 'TypeError: synthetic test example\nToken: forbidden-test-secret' },
+      { event: 'cmd_finished', exit_code: 1 },
+    ] });
+    throw Error('Unexpected new P3.1 request');
+  });
+  assert.equal(inspection.vcs.revision, exact);
+  assert.equal(inspection.vcs.branch, branch);
+  assert.equal(inspection.failure.jobId, job);
+  assert.equal(inspection.failure.exitCode, 1);
+  assert.match(JSON.stringify(inspection.failure), /synthetic test example/);
+  assert.doesNotMatch(JSON.stringify(inspection), /forbidden-test-secret|Token:/);
+  assert.equal(visited.length, 3);
+
+  for (const mutation of [
+    { commit_sha: 'a'.repeat(40) },
+    { project_id: otherProjectId },
+    { result: 'passed' },
+    { state: 'running' },
+  ]) {
+    let calls = 0;
+    await assert.rejects(execute(command('inspect', { pipelineId: pinned }), async () => {
+      calls++;
+      return response({ pipeline: { ...allowed, ...mutation } });
+    }), /mismatch/);
+    assert.equal(calls, 1);
+  }
+
+  // A third P3.1 pipeline cannot be inspected by adding a different request ID.
+  const otherPipeline = 'aaaaaaaa-bbbb-4ccc-8ddd-333333333333';
+  let calls = 0;
+  await assert.rejects(execute(command('inspect', { pipelineId: otherPipeline }), async () => {
+    calls++;
+    return response({ pipeline: { ...allowed, ppl_id: otherPipeline } });
+  }), /pinned failure identity mismatch/);
+  assert.equal(calls, 1);
+
+  assert.throws(() => valid(command('trigger', {
+    branch, commitSha: exact, mode: 'validation',
+  })), /Branch not permitted/);
+  for (const action of ['churchpro_artifact_probe', 'churchpro_report']) {
+    await assert.rejects(execute(command(action, {
+      pipelineId: pinned, jobId: job,
+      artifactPath: 'qa-intel/churchpro/agent-handoff.json',
+    }), async () => response({ pipeline: allowed })), /ownership mismatch/);
+  }
+});
