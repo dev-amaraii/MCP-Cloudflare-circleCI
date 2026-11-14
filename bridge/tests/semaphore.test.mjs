@@ -26,7 +26,19 @@ class KV {
 }
 
 test('Semaphore is opt-in, validation-only and pins the current pilot branch and exact revision',()=>{
- assert.deepEqual(SEMAPHORE_BRANCHES,[branch,'development']);
+ assert.deepEqual([...SEMAPHORE_BRANCHES].sort(), [
+  'ci/semaphore-validation-20261106',
+  'feat/gym-historical-service-review-20261112',
+  'feat/gym-historical-reconciliation-integration-20261113',
+  'development',
+  'codex/bar-bill-summary-20261107',
+  'codex/bar-bill-staging-live-base-20261108',
+  'codex/qa-intel-hosted-observation-20261108',
+  'ci/qa-intel-hosted-auth-20261108',
+  'codex/qa-intel-full-walkthrough-20261109',
+  'ci/qa-intel-walkthrough-survey-20261109',
+  'codex/qa-intel-bar-synthetic-transactions-20261109',
+ ].sort(), 'Semaphore allowed branches must match live v149 exactly');
  assert.equal(validate(command('trigger',{branch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  for(const patch of [
   {branch:'staging',mode:'validation',commitSha:revision},
