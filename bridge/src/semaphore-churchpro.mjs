@@ -73,6 +73,11 @@ const P31_PINNED_FAILED_PIPELINE = Object.freeze({
   pipelineId: 'd176a479-60d4-463d-99e9-7a0a5cdecbb9',
   revision: 'a51325bd11759f076829048523b0e7e112bf1d0e',
 });
+const P31_PINNED_API_FAILURE = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: 'ee3f1bed-710e-4f06-9c47-6624213f8c54',
+  revision: 'afa538d0f6b0d407c57ca66eb3ff669da9ed73da',
+});
 function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
   if (!pipeline || pipeline.project_id !== expectedId ||
@@ -595,12 +600,15 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       ...CHURCHPRO_INSPECT_ONLY_BRANCHES,
       P31_PINNED_FAILED_PIPELINE.branch,
     ]);
-    // P3.1 exception: one exact failed source/pipeline. Reject before any
-    // detailed workflow or failure log request; preserve all other gates.
+    // P3.1 exceptions: exactly two individually enumerated FAILED source/CI
+    // pairs, never a wildcard branch allowlist or access to later revisions.
+    // Reject before requesting detailed workflow or sanitized provider logs.
+    const p31Allowed = [P31_PINNED_FAILED_PIPELINE, P31_PINNED_API_FAILURE].some(pin =>
+      pin.branch === pipeline.branch_name &&
+      pin.pipelineId === command.pipelineId &&
+      pin.revision === pipeline.commit_sha);
     if (pipeline.branch_name === P31_PINNED_FAILED_PIPELINE.branch &&
-        (command.pipelineId !== P31_PINNED_FAILED_PIPELINE.pipelineId ||
-         pipeline.commit_sha !== P31_PINNED_FAILED_PIPELINE.revision ||
-         pipeline.state !== 'done' || pipeline.result !== 'failed')) {
+        (!p31Allowed || pipeline.state !== 'done' || pipeline.result !== 'failed')) {
       throw Error('ChurchPro P3.1 pinned failure identity mismatch');
     }
     if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId) {
