@@ -104,11 +104,11 @@ const G4C_EVIDENCE = Object.freeze({
 });
 // G4d exact green disposable QA run, three synthetic mobile screenshots only.
 const G4D_EVIDENCE = Object.freeze({
-  pipelineId: '7f560488-5a76-46c2-b1af-fc2c07012afa',
-  revision: 'f1e6c9a299614d83eae53c521af1b30ea1463e14',
+  pipelineId: '1d231c7d-9196-4699-9a60-88490af6dbf7',
+  revision: 'a7cdeef9eaf386630e4fb7f5ceb338c8f9b31968',
   branch: 'codex/churchpro-p2-g4d-record-capabilities-readonly-20261114',
-  apiJob: 'eff790d5-c0a0-48cc-b9cb-76535faca26c',
-  browserJob: '458871e1-f51f-4a17-b02c-e98a92fce137',
+  apiJob: '76cb605a-6b3a-4739-876c-f69912a4bb51',
+  browserJob: '4d7fb16d-47f0-4c66-8c78-b05588aa8d9d',
   screenshots: Object.freeze([
     'g4d-editor-record-390.png',
     'g4d-reader-record-320.png',
