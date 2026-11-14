@@ -256,11 +256,11 @@ test('ChurchPro artifact report reads only owned exact-revision sanitized QA sum
 });
 
 test('ChurchPro G4b QA evidence is pinned to one green exact-revision pipeline and authorized job IDs', async () => {
-  const pinned = 'e877e65e-cd87-4434-ba3c-bfbf9c210cf1';
-  const exact = 'f4fa1cf1c7ea535f6707793b156042f156db71e3';
+  const pinned = 'f7a562d4-0e09-4c86-8c71-a5dcc942f19d';
+  const exact = '36aa0d03a7a2da8522156e6297eb6e8288e318c0';
   const branch = 'codex/churchpro-p2-g4b-private-profile-duplicate-ui-20261113';
-  const apiJob = '0d0eadb1-5adf-45aa-b5b6-78ae624dee3c';
-  const browserJob = '47c8ca4b-ce79-44ee-af13-7b290b97e54d';
+  const apiJob = '6bbc9c99-a1ab-4bb5-8ffe-4d17d89cd30a';
+  const browserJob = '9d366a24-951c-4c95-8ef7-847d96970671';
   const reportPath = 'qa-intel/churchpro/agent-handoff.json';
   const browserPath = 'qa-intel/churchpro/gather-browser-handoff.json';
   const base = { ppl_id: pinned, wf_id: workflowId, project_id: projectId,
@@ -334,10 +334,10 @@ test('ChurchPro G4b QA evidence is pinned to one green exact-revision pipeline a
 });
 
 test('ChurchPro G4b PNG retrieval requires exact synthetic manifest, job and dimensions',async()=>{
-  const pinned='e877e65e-cd87-4434-ba3c-bfbf9c210cf1';
-  const exact='f4fa1cf1c7ea535f6707793b156042f156db71e3';
+  const pinned='f7a562d4-0e09-4c86-8c71-a5dcc942f19d';
+  const exact='36aa0d03a7a2da8522156e6297eb6e8288e318c0';
   const branch='codex/churchpro-p2-g4b-private-profile-duplicate-ui-20261113';
-  const browserJob='47c8ca4b-ce79-44ee-af13-7b290b97e54d';
+  const browserJob='9d366a24-951c-4c95-8ef7-847d96970671';
   const file='g4b-contact-hidden-390.png', path='visual-review/'+file;
   const png=new Uint8Array(33);
   png.set([137,80,78,71,13,10,26,10],0);
@@ -376,7 +376,7 @@ test('ChurchPro G4b PNG retrieval requires exact synthetic manifest, job and dim
   assert.equal(JSON.stringify(out).includes('secret=not-for-output'),false);
   assert.equal(JSON.stringify(out).includes(env.SEMAPHORE_TOKEN),false);
 
-  for(const wrongJob of [id,'0d0eadb1-5adf-45aa-b5b6-78ae624dee3c']){
+  for(const wrongJob of [id,'6bbc9c99-a1ab-4bb5-8ffe-4d17d89cd30a']){
     const calls=[];
     await assert.rejects(execute(command('churchpro_png',{
       pipelineId:pinned,jobId:wrongJob,artifactPath:path,
