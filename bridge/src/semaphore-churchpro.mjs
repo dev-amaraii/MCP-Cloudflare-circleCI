@@ -148,10 +148,32 @@ const G4D_EVIDENCE = Object.freeze({
   ]),
 });
 const EVIDENCE = Object.freeze([G4B_EVIDENCE, G4C_EVIDENCE, G4D_EVIDENCE]);
+// Source-pinned, sanitized JSON review only. NOT authorization for PNGs,
+// raw logs, arbitrary files, successful-run inspect, or future P3.1 pipelines.
+const P31_PINNED_SUCCESS_REPORTS = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: '80f5a3cf-e8dc-454a-999d-820e99d06b62',
+  revision: 'd806877f3532b69223a822ebd0a2131b7a65363a',
+  jobs: Object.freeze({
+    'qa-intel/churchpro/agent-handoff.json': 'Database, authenticated API and strict QA-Intel',
+    'qa-intel/churchpro/gather-browser-handoff.json': 'Authenticated Gather browser and visual review',
+  }),
+});
 function checkedEvidencePipeline(response, expectedId, command) {
   const evidence = EVIDENCE.find(pin => pin.pipelineId === command.pipelineId);
-  const pipeline = checkedPipeline(response, expectedId, evidence
-    ? [evidence.branch] : [CHURCHPRO_SEMAPHORE.branch]);
+  const p31ReportsOnly = command.action === 'churchpro_report' &&
+    command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId;
+  const pipeline = checkedPipeline(response, expectedId, p31ReportsOnly
+    ? [P31_PINNED_SUCCESS_REPORTS.branch]
+    : evidence ? [evidence.branch] : [CHURCHPRO_SEMAPHORE.branch]);
+  if (p31ReportsOnly) {
+    if (pipeline.commit_sha !== P31_PINNED_SUCCESS_REPORTS.revision ||
+        pipeline.state !== 'done' || pipeline.result !== 'passed' ||
+        !Object.hasOwn(P31_PINNED_SUCCESS_REPORTS.jobs, command.artifactPath)) {
+      throw Error('ChurchPro P3.1 pinned green-report identity mismatch');
+    }
+    return pipeline;
+  }
   if (!evidence) return pipeline;
   if (pipeline.commit_sha !== evidence.revision ||
       pipeline.state !== 'done' || pipeline.result !== 'passed') {
@@ -586,7 +608,12 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
     const job = jobs.find(item => item?.job_id === command.jobId);
     if (!job || (EVIDENCE.some(pin => command.pipelineId === pin.pipelineId) &&
-        job.result?.toLowerCase() !== 'passed')) throw Error('ChurchPro QA job ownership mismatch');
+        job.result?.toLowerCase() !== 'passed') ||
+        (command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId &&
+         (job.result?.toLowerCase() !== 'passed' ||
+          job.name !== P31_PINNED_SUCCESS_REPORTS.jobs[command.artifactPath]))) {
+      throw Error('ChurchPro QA job ownership mismatch');
+    }
     const scope = '?scope=jobs&scope_id=' + command.jobId;
     // Semaphore's artifact push job stores the basename at the job root.
     const actualPath = command.artifactPath.slice('qa-intel/churchpro/'.length);
@@ -603,12 +630,19 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
       .find(item => item.path === actualPath && typeof item.url === 'string');
     if (!signed) throw Error('QA artifact unavailable');
     const data = await downloadSanitizedReport(signed.url, requestFn);
+    const summary = summaryFromReport(data, command.artifactPath, pipeline.commit_sha);
+    if (command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId &&
+        (summary.status !== 'passed' || summary.passed !== summary.total ||
+         summary.total !== (summary.type === 'qa-intel-api' ? 73 : 35) ||
+         data.productAcceptance !== 'pending_independent_qa_review')) {
+      throw Error('ChurchPro P3.1 report evidence mismatch');
+    }
     return {
       provider: 'semaphore',
       project: 'churchpro',
       pipelineId: command.pipelineId,
       revision: pipeline.commit_sha,
-      ...summaryFromReport(data, command.artifactPath, pipeline.commit_sha),
+      ...summary,
     };
   }
   if (command.action === 'inspect') {
