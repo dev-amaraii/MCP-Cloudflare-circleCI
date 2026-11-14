@@ -1125,10 +1125,11 @@ test('second pinned P3.1 API failure has exact source/job and no cross-pipeline 
   assert.throws(() => valid(command('trigger', {
     branch, commitSha: exact, mode: 'validation',
   })), /Branch not permitted/);
-  // Artifact probing is rejected synchronously by command validation.
-  assert.throws(() => valid(command('churchpro_artifact_probe', {
+  // A syntactically valid artifact probe still fails the separate exact
+  // evidence-ownership check; no new artifacts are accessible.
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
     pipelineId: pinned, jobId: job,
-  })), /not permitted/);
+  }), async () => response({ pipeline: allowed })), /ownership mismatch|not permitted/);
   // A report request may pass schema validation but must fail exact evidence
   // ownership before any private signed artifact can be retrieved.
   await assert.rejects(execute(command('churchpro_report', {
