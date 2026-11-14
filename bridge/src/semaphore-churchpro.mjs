@@ -150,6 +150,7 @@ const G4D_EVIDENCE = Object.freeze({
 const EVIDENCE = Object.freeze([G4B_EVIDENCE, G4C_EVIDENCE, G4D_EVIDENCE]);
 // Source-pinned, sanitized JSON review only. NOT authorization for PNGs,
 // raw logs, arbitrary files, successful-run inspect, or future P3.1 pipelines.
+const P31_GREEN_REPORT_JOB_SELECTOR = '00000000-0000-4000-8000-000000000001';
 const P31_PINNED_SUCCESS_REPORTS = Object.freeze({
   branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
   pipelineId: '80f5a3cf-e8dc-454a-999d-820e99d06b62',
@@ -588,6 +589,12 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
         !CHURCHPRO_QA_REPORTS.includes(command.artifactPath)) {
       throw Error('ChurchPro report access not permitted');
     }
+    // For the one exact green P3.1 run, select a trusted named job inside
+    // verified Semaphore metadata; no guessed provider IDs or broad job lookup.
+    if (command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId &&
+        command.jobId !== P31_GREEN_REPORT_JOB_SELECTOR) {
+      throw Error('ChurchPro P3.1 report job selector mismatch');
+    }
     const basics = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
       undefined, requestFn);
     const pipeline = checkedEvidencePipeline(basics, id, command);
@@ -606,15 +613,19 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     }
     const jobs = (Array.isArray(details.blocks) ? details.blocks : [])
       .flatMap(block => Array.isArray(block.jobs) ? block.jobs : []);
-    const job = jobs.find(item => item?.job_id === command.jobId);
+    const p31ExactGreen = command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId;
+    const pinnedJobs = p31ExactGreen ? jobs.filter(item =>
+      item?.name === P31_PINNED_SUCCESS_REPORTS.jobs[command.artifactPath] &&
+      UUID.test(item?.job_id ?? '') && item?.result?.toLowerCase() === 'passed') : [];
+    if (p31ExactGreen && pinnedJobs.length !== 1) {
+      throw Error('ChurchPro P3.1 exact named job ownership mismatch');
+    }
+    const job = p31ExactGreen ? pinnedJobs[0] : jobs.find(item => item?.job_id === command.jobId);
     if (!job || (EVIDENCE.some(pin => command.pipelineId === pin.pipelineId) &&
-        job.result?.toLowerCase() !== 'passed') ||
-        (command.pipelineId === P31_PINNED_SUCCESS_REPORTS.pipelineId &&
-         (job.result?.toLowerCase() !== 'passed' ||
-          job.name !== P31_PINNED_SUCCESS_REPORTS.jobs[command.artifactPath]))) {
+        job.result?.toLowerCase() !== 'passed')) {
       throw Error('ChurchPro QA job ownership mismatch');
     }
-    const scope = '?scope=jobs&scope_id=' + command.jobId;
+    const scope = '?scope=jobs&scope_id=' + (p31ExactGreen ? job.job_id : command.jobId);
     // Semaphore's artifact push job stores the basename at the job root.
     const actualPath = command.artifactPath.slice('qa-intel/churchpro/'.length);
     const listing = await semaphoreRequest(env, '/artifacts' + scope,
