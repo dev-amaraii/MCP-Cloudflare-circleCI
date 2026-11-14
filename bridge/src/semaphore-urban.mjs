@@ -32,6 +32,48 @@ async function semaphoreRequest(env,path,body,requestFn) {
 }
 const safe=(v,allowed)=>typeof v==='string'&&allowed.includes(v.toLowerCase())?v.toLowerCase():null;
 
+
+const BUNDLE_PATH='preview-bundle/urban-paints-preview.tgz';
+const MAX_BUNDLE_BYTES=5_000_000;
+function safeArtifactHost(u){
+  const h=u.hostname.toLowerCase();
+  return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&(
+    h==='storage.googleapis.com'||h.endsWith('.storage.googleapis.com')||
+    h==='s3.amazonaws.com'||h.endsWith('.s3.amazonaws.com')||
+    /^[a-z0-9.-]+\.s3\.[a-z0-9-]+\.amazonaws\.com$/.test(h)||
+    h==='artifacts.semaphoreci.com'||h.endsWith('.artifacts.semaphoreci.com'));
+}
+async function fetchBundle(signedUrl,requestFn){
+  let url;try{url=new URL(signedUrl);}catch{throw Error('Unsafe Urban artifact URL');}
+  for(let redirect=0;redirect<3;redirect++){
+    if(!safeArtifactHost(url))throw Error('Unsafe Urban artifact URL');
+    const response=await requestFn(url.toString(),{method:'GET',redirect:'manual',headers:{Accept:'application/octet-stream'}});
+    if([301,302,303,307,308].includes(response.status)){
+      const next=response.headers.get('location');
+      if(!next)throw Error('Urban artifact redirect rejected');
+      url=new URL(next,url);continue;
+    }
+    if(!response.ok||!response.body)throw Error('Urban artifact download failed');
+    const announced=Number(response.headers.get('content-length')||0);
+    if(!Number.isFinite(announced)||announced>MAX_BUNDLE_BYTES)throw Error('Urban artifact too large');
+    const chunks=[],reader=response.body.getReader();let length=0;
+    for(;;){
+      const {done,value}=await reader.read();if(done)break;
+      length+=value.byteLength;
+      if(length>MAX_BUNDLE_BYTES){await reader.cancel();throw Error('Urban artifact too large');}
+      chunks.push(value);
+    }
+    if(length<10)throw Error('Urban artifact format invalid');
+    const bytes=new Uint8Array(length);let pos=0;
+    for(const part of chunks){bytes.set(part,pos);pos+=part.byteLength;}
+    if(bytes[0]!==31||bytes[1]!==139)throw Error('Urban artifact format invalid');
+    let binary='';
+    for(let p=0;p<bytes.length;p+=16000)binary+=String.fromCharCode(...bytes.subarray(p,p+16000));
+    return {bytes:length,dataBase64:btoa(binary),encoding:'gzip+tar'};
+  }
+  throw Error('Urban artifact redirect rejected');
+}
+
 export async function executeSemaphoreUrban(env,command,requestFn=fetch) {
   if(command.project!==URBAN_SEMAPHORE.project||command.provider!=='semaphore')
     throw Error('Urban Paints project mismatch');
@@ -43,6 +85,26 @@ export async function executeSemaphoreUrban(env,command,requestFn=fetch) {
     allowedBranches:[URBAN_SEMAPHORE.branch],availableModes:['validation']
   };
   const id=projectId(env);
+  if(command.action==='urban_preview_bundle'){
+    if(command.artifactPath!==BUNDLE_PATH||typeof command.pipelineId!=='string'||!UUID.test(command.pipelineId)||
+       command.branch!==URBAN_SEMAPHORE.branch||typeof command.commitSha!=='string'||!SHA.test(command.commitSha))
+      throw Error('Urban bundle request not permitted');
+    const basic=await semaphoreRequest(env,'/pipelines/'+command.pipelineId,undefined,requestFn);
+    const pipeline=basic.pipeline;
+    if(!pipeline||pipeline.project_id!==id||(pipeline.ppl_id&&pipeline.ppl_id!==command.pipelineId)||
+       pipeline.branch_name!==URBAN_SEMAPHORE.branch||pipeline.commit_sha!==command.commitSha||
+       String(pipeline.state).toLowerCase()!=='done'||String(pipeline.result).toLowerCase()!=='passed')
+      throw Error('Urban build provenance mismatch');
+    const workflowId=pipeline.wf_id;
+    if(!UUID.test(workflowId||''))throw Error('Urban workflow identity missing');
+    const signed=await semaphoreRequest(env,'/artifacts/signed_url?scope=workflows&scope_id='+
+      encodeURIComponent(workflowId)+'&path='+encodeURIComponent(BUNDLE_PATH)+'&method=GET',undefined,requestFn);
+    const matches=(Array.isArray(signed.items)?signed.items:[]).filter(x=>x.path===BUNDLE_PATH&&typeof x.url==='string');
+    if(matches.length!==1)throw Error('Urban artifact not found');
+    return {provider:'semaphore',project:URBAN_SEMAPHORE.project,pipelineId:command.pipelineId,
+      branch:URBAN_SEMAPHORE.branch,commitSha:command.commitSha,path:BUNDLE_PATH,
+      ...await fetchBundle(matches[0].url,requestFn)};
+  }
   if(command.action==='trigger'){
     if(command.mode!=='validation'||command.branch!==URBAN_SEMAPHORE.branch||
         typeof command.commitSha!=='string'||!SHA.test(command.commitSha))
