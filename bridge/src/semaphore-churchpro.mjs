@@ -102,7 +102,20 @@ const G4C_EVIDENCE = Object.freeze({
     'g4c-owner-actions-390.png', 'g4c-basic-actions-hidden-390.png',
   ]),
 });
-const EVIDENCE = Object.freeze([G4B_EVIDENCE, G4C_EVIDENCE]);
+// G4d exact green disposable QA run, three synthetic mobile screenshots only.
+const G4D_EVIDENCE = Object.freeze({
+  pipelineId: '1d231c7d-9196-4699-9a60-88490af6dbf7',
+  revision: 'a7cdeef9eaf386630e4fb7f5ceb338c8f9b31968',
+  branch: 'codex/churchpro-p2-g4d-record-capabilities-readonly-20261114',
+  apiJob: '76cb605a-6b3a-4739-876c-f69912a4bb51',
+  browserJob: '4d7fb16d-47f0-4c66-8c78-b05588aa8d9d',
+  screenshots: Object.freeze([
+    'g4d-editor-record-390.png',
+    'g4d-reader-record-320.png',
+    'g4d-branch-cell-390.png',
+  ]),
+});
+const EVIDENCE = Object.freeze([G4B_EVIDENCE, G4C_EVIDENCE, G4D_EVIDENCE]);
 function checkedEvidencePipeline(response, expectedId, command) {
   const evidence = EVIDENCE.find(pin => pin.pipelineId === command.pipelineId);
   const pipeline = checkedPipeline(response, expectedId, evidence
