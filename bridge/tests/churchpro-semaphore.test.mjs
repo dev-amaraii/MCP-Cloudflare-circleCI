@@ -845,7 +845,7 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
   }), async () => response(g4dPipeline)), /ownership mismatch/);
   await assert.rejects(execute(command('churchpro_png', {
     pipelineId, jobId: id, artifactPath: 'visual-review/g4c-owner-actions-390.png',
-  }), async () => response(g4dPipeline)), /ownership mismatch|not allowed/);
+  }), async () => response(g4dPipeline)), /ownership mismatch|not allowed|not permitted/);
 
   assert.throws(() => valid(command('trigger', {
     branch: g3Branch, commitSha: revision, mode: 'validation',
