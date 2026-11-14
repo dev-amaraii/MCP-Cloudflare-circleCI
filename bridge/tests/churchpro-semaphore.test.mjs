@@ -821,6 +821,32 @@ test('department PR #20 is read-only inspectable without expanding triggers, art
     pipelineId, jobId: id, artifactPath: 'qa-intel/churchpro/agent-handoff.json',
   }), async () => response(g4cPipeline)), /ownership mismatch/);
 
+  // G4d is also exact-branch inspect-only, with no paid CI trigger or QA artifact access.
+  const g4dBranch = 'codex/churchpro-p2-g4d-record-capabilities-readonly-20261114';
+  const g4dPipeline = { pipeline: { ...basic.pipeline, branch_name: g4dBranch } };
+  const g4dRequests = [];
+  const g4dInspection = await execute(command('inspect', { pipelineId }), async url => {
+    g4dRequests.push(url);
+    return response(g4dRequests.length === 1 ? g4dPipeline : {
+      pipeline: g4dPipeline.pipeline, blocks: [],
+    });
+  });
+  assert.equal(g4dInspection.vcs.branch, g4dBranch);
+  assert.equal(g4dInspection.vcs.revision, revision);
+  assert.equal(g4dRequests.length, 2);
+  assert.throws(() => valid(command('trigger', {
+    branch: g4dBranch, commitSha: revision, mode: 'validation',
+  })), /Branch not permitted/);
+  await assert.rejects(execute(command('churchpro_artifact_probe', {
+    pipelineId, jobId: id,
+  }), async () => response(g4dPipeline)), /ownership mismatch/);
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId, jobId: id, artifactPath: 'qa-intel/churchpro/agent-handoff.json',
+  }), async () => response(g4dPipeline)), /ownership mismatch/);
+  await assert.rejects(execute(command('churchpro_png', {
+    pipelineId, jobId: id, artifactPath: 'visual-review/g4c-owner-actions-390.png',
+  }), async () => response(g4dPipeline)), /ownership mismatch|not allowed|not permitted/);
+
   assert.throws(() => valid(command('trigger', {
     branch: g3Branch, commitSha: revision, mode: 'validation',
   })), /Branch not permitted/);
