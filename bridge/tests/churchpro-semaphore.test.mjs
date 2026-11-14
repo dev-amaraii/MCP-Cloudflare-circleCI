@@ -1407,3 +1407,163 @@ test('sixth pinned P3.1 pre-acceptance failed pipeline is read-only and fails cl
     pipelineId: pinned, jobId,
   }), async () => response({ pipeline })), /ownership mismatch|not permitted/);
 });
+
+
+test('P3.1 exact-green sanitized handoff access is restricted to two owned jobs and reports', async () => {
+  const pinned = '80f5a3cf-e8dc-454a-999d-820e99d06b62';
+  const exact = 'd806877f3532b69223a822ebd0a2131b7a65363a';
+  const branch = 'codex/churchpro-p3-p31-manual-sessions-20261114';
+  const apiJob = 'aaaaaaaa-bbbb-4ccc-8ddd-123456789021';
+  const browserJob = 'aaaaaaaa-bbbb-4ccc-8ddd-123456789022';
+  const base = {
+    ppl_id: pinned, wf_id: workflowId, project_id: projectId,
+    branch_name: branch, commit_sha: exact, state: 'done', result: 'passed',
+  };
+  const fixtures = [
+    {
+      path: 'qa-intel/churchpro/agent-handoff.json',
+      jobId: apiJob, name: 'Database, authenticated API and strict QA-Intel',
+      type: 'qa-intel-api', total: 73,
+      data: {
+        schemaVersion: 1, project: 'churchpro', product: 'ChurchPro', revision: exact,
+        evidenceStatus: 'passed', productAcceptance: 'pending_independent_qa_review',
+        checks: Array.from({length: 73}, (_, i) => ({
+          intent: 'synthetic_intent_' + i, status: 'passed',
+        })),
+      },
+    },
+    {
+      path: 'qa-intel/churchpro/gather-browser-handoff.json',
+      jobId: browserJob, name: 'Authenticated Gather browser and visual review',
+      type: 'gather-browser', total: 35,
+      data: {
+        sourceSha: exact, evidence: 'disposable-real-postgresql-nest-browser',
+        status: 'passed', productAcceptance: 'pending_independent_qa_review',
+        cases: Array.from({length: 35}, (_, i) => ({
+          id: 'synthetic_browser_' + i, status: 'passed',
+        })),
+      },
+    },
+  ];
+  const fetcher = (row, change = {}) => async (url) => {
+    if (url.endsWith('/pipelines/' + pinned)) return response({pipeline: {
+      ...base, ...(change.pipeline ?? {}),
+    }});
+    if (url.endsWith('?detailed=true')) return response({
+      pipeline: {wf_id: workflowId, branch_name: branch},
+      blocks: [{jobs: [{
+        job_id: row.jobId, name: change.jobName ?? row.name,
+        status: 'finished', result: change.jobResult ?? 'passed',
+      }]}],
+    });
+    if (url.includes('/artifacts/signed_url')) return response({items: [{
+      path: row.path.split('/').at(-1),
+      url: 'https://storage.googleapis.com/synthetic/p31-' + row.type + '.json?sig=private',
+    }]});
+    if (url.includes('/artifacts?')) return response({artifacts: [{
+      path: row.path.split('/').at(-1), size: 200, is_directory: false,
+    }]});
+    if (url.startsWith('https://storage.googleapis.com/')) {
+      return response(change.data ?? row.data);
+    }
+    throw Error('Unexpected P3.1 report access');
+  };
+  for (const row of fixtures) {
+    const visited = [];
+    const result = await execute(command('churchpro_report', {
+      pipelineId: pinned, jobId: row.jobId, artifactPath: row.path,
+    }), async url => { visited.push(url); return fetcher(row)(url); });
+    assert.equal(result.revision, exact);
+    assert.equal(result.type, row.type);
+    assert.equal(result.total, row.total);
+    assert.equal(result.passed, row.total);
+    assert.equal(result.status, 'passed');
+    assert.deepEqual(result.failed, []);
+    assert.equal(visited.length, 5);
+    assert.doesNotMatch(JSON.stringify(result), /sig=private|synthetic_intent|synthetic_browser|synthetic-bridge-test-token/);
+  }
+
+  for (const change of [
+    {project_id: otherProjectId},
+    {branch_name: 'main'},
+    {commit_sha: revision},
+    {state: 'running'},
+    {result: 'failed'},
+  ]) {
+    let calls = 0;
+    await assert.rejects(execute(command('churchpro_report', {
+      pipelineId: pinned, jobId: apiJob, artifactPath: fixtures[0].path,
+    }), async () => {
+      calls++;
+      return response({pipeline: {...base, ...change}});
+    }), /mismatch/);
+    assert.equal(calls, 1, 'Wrong project/branch/SHA/state/result rejected before artifact lookup');
+  }
+
+  for (const change of [
+    {jobName: 'A different job'},
+    {jobResult: 'failed'},
+  ]) {
+    let calls = 0;
+    await assert.rejects(execute(command('churchpro_report', {
+      pipelineId: pinned, jobId: apiJob, artifactPath: fixtures[0].path,
+    }), async url => { calls++; return fetcher(fixtures[0], change)(url); }),
+    /ownership mismatch/);
+    assert.equal(calls, 2, 'Wrong job must fail before listing or signing artifacts');
+  }
+  for (const row of fixtures) {
+    let calls = 0;
+    await assert.rejects(execute(command('churchpro_report', {
+      pipelineId: pinned, jobId: row.jobId,
+      artifactPath: row.path === fixtures[0].path ? fixtures[1].path : fixtures[0].path,
+    }), async url => { calls++; return fetcher(row)(url); }), /ownership mismatch/);
+    assert.equal(calls, 2, 'Crossing report/job roles must fail before listing artifacts');
+  }
+  for (const row of fixtures) {
+    const malformed = {
+      ...row.data, productAcceptance: 'accepted_without_review',
+    };
+    await assert.rejects(execute(command('churchpro_report', {
+      pipelineId: pinned, jobId: row.jobId, artifactPath: row.path,
+    }), fetcher(row, {data: malformed})), /evidence mismatch/);
+    const truncated = row.type === 'qa-intel-api'
+      ? {...row.data, checks: row.data.checks.slice(0, -1)}
+      : {...row.data, cases: row.data.cases.slice(0, -1)};
+    await assert.rejects(execute(command('churchpro_report', {
+      pipelineId: pinned, jobId: row.jobId, artifactPath: row.path,
+    }), fetcher(row, {data: truncated})), /evidence mismatch/);
+  }
+
+  // No screenshots, arbitrary artifact probing, logs, triggers, or future P3.1 runs.
+  assert.throws(() => valid(command('trigger', {
+    branch, commitSha: exact, mode: 'validation',
+  })), /Branch not permitted/);
+  assert.throws(() => valid(command('churchpro_report', {
+    pipelineId: pinned, jobId: apiJob,
+    artifactPath: 'qa-intel/churchpro/secrets.json',
+  })), /not permitted/);
+  for (const action of ['churchpro_artifact_probe', 'churchpro_png']) {
+    let calls = 0;
+    await assert.rejects(execute(command(action, {
+      pipelineId: pinned, jobId: browserJob,
+      ...(action === 'churchpro_png' ? {artifactPath:'visual-review/people-390.png'} : {}),
+    }), async () => {
+      calls++;
+      return response({pipeline: base});
+    }), /mismatch|not permitted/);
+    assert(calls <= 1);
+  }
+  for (const unrelated of [
+    {action: 'inspect', pipelineId:pinned},
+    {action:'churchpro_report',
+      pipelineId:'dddddddd-aaaa-4bbb-8ccc-555555555555',
+      jobId:apiJob, artifactPath:fixtures[0].path},
+  ]) {
+    let calls = 0;
+    await assert.rejects(execute(command(unrelated.action, unrelated), async () => {
+      calls++;
+      return response({pipeline:{...base,ppl_id:unrelated.pipelineId}});
+    }), /mismatch/);
+    assert.equal(calls, 1);
+  }
+});
