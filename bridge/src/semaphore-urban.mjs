@@ -85,6 +85,25 @@ export async function executeSemaphoreUrban(env,command,requestFn=fetch) {
     allowedBranches:[URBAN_SEMAPHORE.branch],availableModes:['validation']
   };
   const id=projectId(env);
+  if(command.action==='urban_preview_list'){
+    if(typeof command.pipelineId!=='string'||!UUID.test(command.pipelineId)||
+       command.branch!==URBAN_SEMAPHORE.branch||typeof command.commitSha!=='string'||!SHA.test(command.commitSha))
+      throw Error('Urban artifact listing not permitted');
+    const basic=await semaphoreRequest(env,'/pipelines/'+command.pipelineId,undefined,requestFn);
+    const p=basic.pipeline;
+    if(!p||p.project_id!==id||(p.ppl_id&&p.ppl_id!==command.pipelineId)||
+       p.branch_name!==URBAN_SEMAPHORE.branch||p.commit_sha!==command.commitSha||
+       String(p.state).toLowerCase()!=='done'||String(p.result).toLowerCase()!=='passed')
+      throw Error('Urban build provenance mismatch');
+    if(!UUID.test(p.wf_id||''))throw Error('Urban workflow identity missing');
+    const out=await semaphoreRequest(env,'/artifacts?scope=workflows&scope_id='+encodeURIComponent(p.wf_id)+
+      '&path=preview-bundle',undefined,requestFn);
+    const entries=(Array.isArray(out.artifacts)?out.artifacts:[])
+      .filter(x=>typeof x.path==='string'&&/^preview-bundle(?:\/[a-zA-Z0-9._-]+)?$/.test(x.path))
+      .slice(0,30).map(x=>({path:x.path,directory:x.is_directory===true,
+        size:Number.isSafeInteger(x.size)&&x.size>=0&&x.size<10000000?x.size:null}));
+    return {project:URBAN_SEMAPHORE.project,provider:'semaphore',pipelineId:command.pipelineId,entries};
+  }
   if(command.action==='urban_preview_bundle'){
     if(command.artifactPath!==BUNDLE_PATH||typeof command.pipelineId!=='string'||!UUID.test(command.pipelineId)||
        command.branch!==URBAN_SEMAPHORE.branch||typeof command.commitSha!=='string'||!SHA.test(command.commitSha))
