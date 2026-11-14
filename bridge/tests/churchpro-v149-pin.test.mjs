@@ -184,7 +184,7 @@ test('current SHA rejects wrong job selector, unauthorized path and escalation a
   const png = command(latest, path, {
     action: 'churchpro_png',
     jobId: jobs[path].id,
-    artifactPath: 'visual-review/person-390.png',
+    artifactPath: 'visual-review/people-390.png',
   });
   let network = 0;
   await assert.rejects(checkedRun(png, async () => {
