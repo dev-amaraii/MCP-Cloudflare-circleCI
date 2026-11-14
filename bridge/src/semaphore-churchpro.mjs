@@ -73,17 +73,18 @@ function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMA
 }
 
 const G4B_EVIDENCE = Object.freeze({
-  pipelineId: 'e877e65e-cd87-4434-ba3c-bfbf9c210cf1',
-  revision: 'f4fa1cf1c7ea535f6707793b156042f156db71e3',
+  pipelineId: 'f7a562d4-0e09-4c86-8c71-a5dcc942f19d',
+  revision: '36aa0d03a7a2da8522156e6297eb6e8288e318c0',
   branch: 'codex/churchpro-p2-g4b-private-profile-duplicate-ui-20261113',
-  apiJob: '0d0eadb1-5adf-45aa-b5b6-78ae624dee3c',
-  browserJob: '47c8ca4b-ce79-44ee-af13-7b290b97e54d',
+  apiJob: '6bbc9c99-a1ab-4bb5-8ffe-4d17d89cd30a',
+  browserJob: '9d366a24-951c-4c95-8ef7-847d96970671',
   screenshots: Object.freeze([
     'people-1280.png', 'people-dark-1280.png', 'person-detail-390.png',
     'g4-requester-390.png', 'g4-review-1280.png', 'g4-review-confirm-1280.png',
     'g4b-contact-hidden-390.png', 'g4b-contact-review-390.png',
     'g4b-sensitive-review-1280.png', 'g4b-duplicate-hidden-1280.png',
     'g4b-duplicate-decision-1280.png', 'g4b-unprivileged-denials-1280.png',
+    'g4b-person-tasks-320.png',
   ]),
 });
 function checkedEvidencePipeline(response, expectedId, command) {
