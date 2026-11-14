@@ -66,6 +66,13 @@ const CHURCHPRO_INSPECT_ONLY_BRANCHES = Object.freeze([
   // G4d scoped Person edit UI; same-project sanitized CI inspect only.
   'codex/churchpro-p2-g4d-record-capabilities-readonly-20261114',
 ]);
+// This failure investigation has an exact source+pipeline allowlist, rather
+// than broad access to all future P3.1 branch pipelines or QA artifacts.
+const P31_PINNED_FAILED_PIPELINE = Object.freeze({
+  branch: 'codex/churchpro-p3-p31-manual-sessions-20261114',
+  pipelineId: 'd176a479-60d4-463d-99e9-7a0a5cdecbb9',
+  revision: 'a51325bd11759f076829048523b0e7e112bf1d0e',
+});
 function checkedPipeline(response, expectedId, allowedBranches = [CHURCHPRO_SEMAPHORE.branch]) {
   const pipeline = response?.pipeline;
   if (!pipeline || pipeline.project_id !== expectedId ||
@@ -583,7 +590,19 @@ export async function executeSemaphoreChurchPro(env, command, requestFn = fetch)
     if (!UUID.test(command.pipelineId ?? '')) throw Error('Invalid ChurchPro pipeline identity');
     const base = await semaphoreRequest(env, '/pipelines/' + command.pipelineId,
       undefined, requestFn);
-    const pipeline = checkedPipeline(base, id, [CHURCHPRO_SEMAPHORE.branch, ...CHURCHPRO_INSPECT_ONLY_BRANCHES]);
+    const pipeline = checkedPipeline(base, id, [
+      CHURCHPRO_SEMAPHORE.branch,
+      ...CHURCHPRO_INSPECT_ONLY_BRANCHES,
+      P31_PINNED_FAILED_PIPELINE.branch,
+    ]);
+    // P3.1 exception: one exact failed source/pipeline. Reject before any
+    // detailed workflow or failure log request; preserve all other gates.
+    if (pipeline.branch_name === P31_PINNED_FAILED_PIPELINE.branch &&
+        (command.pipelineId !== P31_PINNED_FAILED_PIPELINE.pipelineId ||
+         pipeline.commit_sha !== P31_PINNED_FAILED_PIPELINE.revision ||
+         pipeline.state !== 'done' || pipeline.result !== 'failed')) {
+      throw Error('ChurchPro P3.1 pinned failure identity mismatch');
+    }
     if (pipeline.ppl_id && pipeline.ppl_id !== command.pipelineId) {
       throw Error('ChurchPro Semaphore pipeline identity mismatch');
     }
