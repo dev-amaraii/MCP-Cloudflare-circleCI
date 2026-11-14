@@ -1411,6 +1411,7 @@ test('sixth pinned P3.1 pre-acceptance failed pipeline is read-only and fails cl
 
 test('P3.1 exact-green sanitized handoff access is restricted to two owned jobs and reports', async () => {
   const pinned = '80f5a3cf-e8dc-454a-999d-820e99d06b62';
+  const pinnedJobSelector = '00000000-0000-4000-8000-000000000001';
   const exact = 'd806877f3532b69223a822ebd0a2131b7a65363a';
   const branch = 'codex/churchpro-p3-p31-manual-sessions-20261114';
   const apiJob = 'aaaaaaaa-bbbb-4ccc-8ddd-123456789021';
@@ -1471,7 +1472,7 @@ test('P3.1 exact-green sanitized handoff access is restricted to two owned jobs 
   for (const row of fixtures) {
     const visited = [];
     const result = await execute(command('churchpro_report', {
-      pipelineId: pinned, jobId: row.jobId, artifactPath: row.path,
+      pipelineId: pinned, jobId: pinnedJobSelector, artifactPath: row.path,
     }), async url => { visited.push(url); return fetcher(row)(url); });
     assert.equal(result.revision, exact);
     assert.equal(result.type, row.type);
@@ -1492,7 +1493,7 @@ test('P3.1 exact-green sanitized handoff access is restricted to two owned jobs 
   ]) {
     let calls = 0;
     await assert.rejects(execute(command('churchpro_report', {
-      pipelineId: pinned, jobId: apiJob, artifactPath: fixtures[0].path,
+      pipelineId: pinned, jobId: pinnedJobSelector, artifactPath: fixtures[0].path,
     }), async () => {
       calls++;
       return response({pipeline: {...base, ...change}});
@@ -1506,7 +1507,7 @@ test('P3.1 exact-green sanitized handoff access is restricted to two owned jobs 
   ]) {
     let calls = 0;
     await assert.rejects(execute(command('churchpro_report', {
-      pipelineId: pinned, jobId: apiJob, artifactPath: fixtures[0].path,
+      pipelineId: pinned, jobId: pinnedJobSelector, artifactPath: fixtures[0].path,
     }), async url => { calls++; return fetcher(fixtures[0], change)(url); }),
     /ownership mismatch/);
     assert.equal(calls, 2, 'Wrong job must fail before listing or signing artifacts');
@@ -1514,7 +1515,7 @@ test('P3.1 exact-green sanitized handoff access is restricted to two owned jobs 
   for (const row of fixtures) {
     let calls = 0;
     await assert.rejects(execute(command('churchpro_report', {
-      pipelineId: pinned, jobId: row.jobId,
+      pipelineId: pinned, jobId: pinnedJobSelector,
       artifactPath: row.path === fixtures[0].path ? fixtures[1].path : fixtures[0].path,
     }), async url => { calls++; return fetcher(row)(url); }), /ownership mismatch/);
     assert.equal(calls, 2, 'Crossing report/job roles must fail before listing artifacts');
@@ -1524,15 +1525,42 @@ test('P3.1 exact-green sanitized handoff access is restricted to two owned jobs 
       ...row.data, productAcceptance: 'accepted_without_review',
     };
     await assert.rejects(execute(command('churchpro_report', {
-      pipelineId: pinned, jobId: row.jobId, artifactPath: row.path,
+      pipelineId: pinned, jobId: pinnedJobSelector, artifactPath: row.path,
     }), fetcher(row, {data: malformed})), /evidence mismatch/);
     const truncated = row.type === 'qa-intel-api'
       ? {...row.data, checks: row.data.checks.slice(0, -1)}
       : {...row.data, cases: row.data.cases.slice(0, -1)};
     await assert.rejects(execute(command('churchpro_report', {
-      pipelineId: pinned, jobId: row.jobId, artifactPath: row.path,
+      pipelineId: pinned, jobId: pinnedJobSelector, artifactPath: row.path,
     }), fetcher(row, {data: truncated})), /evidence mismatch/);
   }
+
+  // Reject any caller-selected job ID before reaching Semaphore, even from this exact run.
+  let badIdReads = 0;
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId: pinned, jobId: apiJob, artifactPath: fixtures[0].path,
+  }), async () => {
+    badIdReads++;
+    return response({pipeline: base});
+  }), /job selector mismatch/);
+  assert.equal(badIdReads, 0);
+  // Duplicate trusted job names must also fail closed before artifact access.
+  let duplicateReads = 0;
+  await assert.rejects(execute(command('churchpro_report', {
+    pipelineId: pinned, jobId: pinnedJobSelector, artifactPath: fixtures[0].path,
+  }), async url => {
+    duplicateReads++;
+    if (url.endsWith('/pipelines/' + pinned)) return response({pipeline:base});
+    if (url.endsWith('?detailed=true')) return response({
+      pipeline: {wf_id:workflowId,branch_name:branch},
+      blocks:[{jobs:[
+        {job_id:apiJob,name:fixtures[0].name,result:'passed'},
+        {job_id:browserJob,name:fixtures[0].name,result:'passed'},
+      ]}],
+    });
+    throw Error('Forbidden duplicate names proceeded to artifact lookup');
+  }), /named job ownership mismatch/);
+  assert.equal(duplicateReads, 2);
 
   // No screenshots, arbitrary artifact probing, logs, triggers, or future P3.1 runs.
   assert.throws(() => valid(command('trigger', {
