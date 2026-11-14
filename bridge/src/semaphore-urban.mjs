@@ -74,6 +74,38 @@ async function fetchBundle(signedUrl,requestFn){
   throw Error('Urban artifact redirect rejected');
 }
 
+
+function safeUrbanFailureSummary(logs){
+ const events=Array.isArray(logs?.events)?logs.events.slice(-4000):[];
+ let current=null,failed=null;
+ for(const event of events){
+  if(event?.event==='cmd_started')current={directive:String(event.directive||'').slice(0,160),output:''};
+  if(event?.event==='cmd_output'&&current&&typeof event.output==='string')
+    current.output=(current.output+event.output.slice(0,4000)).slice(-32000);
+  if(event?.event==='cmd_finished'&&current){
+    if(Number.isInteger(event.exit_code)&&event.exit_code!==0&&!failed)
+      failed={...current,exitCode:event.exit_code};
+    current=null;
+  }
+ }
+ if(!failed)return {failedCommand:null,exitCode:null,diagnosticLines:[]};
+ const command=/npm run typecheck/.test(failed.directive)?'npm run typecheck':
+  /npm run lint/.test(failed.directive)?'npm run lint':
+  /npm run build/.test(failed.directive)?'npm run build':
+  /npm test/.test(failed.directive)?'npm test':
+  /artifact push/.test(failed.directive)?'artifact push':
+  'validation step';
+ const redact=line=>line
+  .replace(/(?:https?|postgres(?:ql)?):\/\/\S+/gi,'[url]')
+  .replace(/\b(?:Bearer|Token)\s+\S+/gi,'[redacted]')
+  .replace(/\b(?:TOKEN|SECRET|PASSWORD|API_KEY|Authorization)\s*[:=]\s*\S+/gi,'[redacted]')
+  .replace(/\b(?:ghp_|github_pat_|sk-|semaphore_)[A-Za-z0-9_-]+/gi,'[redacted]')
+  .slice(0,350);
+ const lines=failed.output.split(/\r?\n/).filter(line=>
+  /\berror\b|TS\d+|failed|Cannot|SyntaxError|TypeError|Module not found|not found|unexpected|ESLint|expect\(|Received:/i.test(line));
+ return {failedCommand:command,exitCode:failed.exitCode,diagnosticLines:[...new Set(lines.slice(-16).map(redact))]};
+}
+
 export async function executeSemaphoreUrban(env,command,requestFn=fetch) {
   if(command.project!==URBAN_SEMAPHORE.project||command.provider!=='semaphore')
     throw Error('Urban Paints project mismatch');
@@ -85,6 +117,27 @@ export async function executeSemaphoreUrban(env,command,requestFn=fetch) {
     allowedBranches:[URBAN_SEMAPHORE.branch],availableModes:['validation']
   };
   const id=projectId(env);
+
+  if(command.action==='urban_diagnostics'){
+    if(!UUID.test(command.pipelineId||'')||!UUID.test(command.jobId||'')||
+       command.branch!==URBAN_SEMAPHORE.branch||!SHA.test(command.commitSha||''))
+      throw Error('Urban diagnostic request not permitted');
+    const basic=await semaphoreRequest(env,'/pipelines/'+command.pipelineId,undefined,requestFn);
+    const p=basic.pipeline;
+    if(!p||p.project_id!==id||(p.ppl_id&&p.ppl_id!==command.pipelineId)||
+       p.branch_name!==URBAN_SEMAPHORE.branch||p.commit_sha!==command.commitSha||
+       String(p.state).toLowerCase()!=='done'||String(p.result).toLowerCase()!=='failed')
+      throw Error('Urban diagnostics provenance mismatch');
+    const detailed=await semaphoreRequest(env,'/pipelines/'+command.pipelineId+'?detailed=true',undefined,requestFn);
+    const blocks=Array.isArray(detailed.blocks)?detailed.blocks:[];
+    const jobs=blocks.flatMap(block=>Array.isArray(block.jobs)?block.jobs:[]);
+    if(!jobs.some(job=>job.job_id===command.jobId&&job.name==='Typecheck, build and browser QA'&&
+       String(job.result).toLowerCase()==='failed'))
+      throw Error('Urban failed job not owned');
+    const log=await semaphoreRequest(env,'/logs/'+command.jobId,undefined,requestFn);
+    return {provider:'semaphore',project:URBAN_SEMAPHORE.project,pipelineId:command.pipelineId,
+      jobId:command.jobId,...safeUrbanFailureSummary(log)};
+  }
   if(command.action==='urban_preview_list'){
     if(typeof command.pipelineId!=='string'||!UUID.test(command.pipelineId)||
        command.branch!==URBAN_SEMAPHORE.branch||typeof command.commitSha!=='string'||!SHA.test(command.commitSha))
