@@ -30,6 +30,7 @@ test('Semaphore is opt-in, validation-only and pins the current pilot branch and
   'ci/semaphore-validation-20261106',
   'feat/gym-historical-service-review-20261112',
   'feat/gym-historical-reconciliation-integration-20261113',
+  'codex/historical-minimum-records-review-20261114',
   'development',
   'codex/bar-bill-summary-20261107',
   'codex/bar-bill-staging-live-base-20261108',
@@ -38,7 +39,7 @@ test('Semaphore is opt-in, validation-only and pins the current pilot branch and
   'codex/qa-intel-full-walkthrough-20261109',
   'ci/qa-intel-walkthrough-survey-20261109',
   'codex/qa-intel-bar-synthetic-transactions-20261109',
- ].sort(), 'Semaphore allowed branches must match live v149 exactly');
+ ].sort(), 'Semaphore allowed branches must match live v150 exactly');
  assert.equal(validate(command('trigger',{branch,mode:'validation',commitSha:revision})).project,PROJECTS['amaraii-os']);
  for(const patch of [
   {branch:'staging',mode:'validation',commitSha:revision},
@@ -144,4 +145,31 @@ test('failed provider requests are redacted in the queue result and never replay
   throw Error('should not repeat paid run');
  });
  assert.equal(again.skipped,true);
+});
+
+test('PR112 exact Amaraii review commit is required before the Semaphore trigger sends any request',async()=>{
+ const reviewBranch='codex/historical-minimum-records-review-20261114';
+ const authorizedSha='a47ee0e75279d377888d408f72720eb9ffaf7cb8';
+ const approved=command('trigger',{branch:reviewBranch,mode:'validation',commitSha:authorizedSha});
+ assert.equal(validate(approved).project,PROJECTS['amaraii-os']);
+ let providerCalls=0;
+ const passed=await execute(approved,async(url,init)=>{
+  providerCalls++;
+  assert.equal(url,'https://amaraii.semaphoreci.com/api/v1alpha/plumber-workflows');
+  assert.deepEqual(JSON.parse(init.body),{
+   project_id:projectId,reference:'refs/heads/'+reviewBranch,
+   commit_sha:authorizedSha,pipeline_file:'.semaphore/semaphore.yml',
+  });
+  return response({workflow_id:workflowId,pipeline_id:pipelineId});
+ });
+ assert.equal(passed.requestedRevision,authorizedSha);
+ assert.equal(providerCalls,1);
+ const denied=command('trigger',{branch:reviewBranch,mode:'validation',commitSha:revision});
+ await assert.rejects(execute(denied,()=>{
+  providerCalls++;
+  throw Error('foreign revision reached the provider');
+ }),/PR112 revision not permitted/);
+ assert.equal(providerCalls,1,'mismatched SHA must fail before network access');
+ for(const other of [{branch:'main'},{project:'churchpro'},{mode:'release'},{commitSha:'bad'}])
+  assert.throws(()=>validate({...approved,...other}));
 });
