@@ -1,0 +1,35 @@
+# Source-only validation for the shared NEN CI bridge. No deployment, live credentials or CI triggers.
+# NEN International. This pipeline can run only after connecting this repo as a new Semaphore project.
+version: v1.0
+name: NEN CI Bridge — source and regression
+agent:
+  machine:
+    type: f1-standard-4
+    os_image: ubuntu2404
+auto_cancel:
+  running:
+    when: "branch != 'main'"
+global_job_config:
+  env_vars:
+    - name: CI
+      value: "true"
+    - name: NODE_ENV
+      value: "test"
+  prologue:
+    commands:
+      - checkout
+      - sem-version node 24
+      - node --version
+      - test "$(node -p 'process.versions.node.split(".")[0]')" = "24"
+      - test "$(git rev-parse HEAD)" = "$SEMAPHORE_GIT_SHA"
+blocks:
+  - name: Strict source and test review
+    dependencies: []
+    task:
+      jobs:
+        - name: Seven-module parity, command isolation and complete Node test suite
+          commands:
+            - test -f bridge/LIVE-V149-SOURCE-CHECKPOINT.md
+            - test -f bridge/tests/live-v149-source-parity.test.mjs
+            - for file in bridge/src/*.mjs bridge/tests/*.test.mjs; do node --check "$file" || exit 1; done
+            - cd bridge && node --test tests/*.test.mjs
