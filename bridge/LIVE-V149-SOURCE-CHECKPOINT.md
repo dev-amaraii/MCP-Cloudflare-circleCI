@@ -1,3 +1,5 @@
+> **Current source parity as of 15 November 2026: live Worker v150.** This document began as a v149 checkpoint; the v149 hashes and rollback facts below are historical, not the current deployment identity. The 15 November v150 supersession note at the end is authoritative for PR #28's current source. The branch/path retain their original v149 names to preserve existing links.
+
 # NEN CI Bridge — live v149 source checkpoint
 
 **Owner:** NEN International / NEN Context OS
@@ -113,3 +115,20 @@ These files contain **96 named test groups** in total. The complete `bridge/test
 **Runner alternatives attempted without production mutation:** Node.js 22 was available in the isolated local container, but outbound GitHub cloning remained blocked by DNS/egress; a Vercel Sandbox attempt stopped at the required `projectId` preflight without provisioning a sandbox/project. Do not create unrelated infrastructure to bypass this gate.
 
 **Remaining controls:** Complete **all** repository Node test groups via Semaphore or an accessible checkout. Compare the resulting output to PR #28's exact head SHA; if failures occur, correct **test-only** fixtures first, and do not modify any of the seven live-source modules without separately reviewing impact on the immutable v149 hash test. Independent cross-project/security review, PR merge approval and older #26/#27 supersession remain separate.
+
+## 15 November 2026 — Live v150 source supersedes the v149-only snapshot
+
+**Concurrent independently owner-approved NEN deployment identified:** Cloudflare `nen-ci-bridge` now runs **v150**, version `e09c093b-84b9-4e05-9de0-02c5fc010f1b`, deployment `643ef42e-e821-4895-a1c0-c0556b06c963`, effective **100%** at `2026-11-15T05:38:58.73849Z`. Worker deployment annotation: `Approved PR112 exact-SHA validation-only branch allowlist; no deployment actions added`. The change was **not** made by this PR #28 source-reconciliation task. Cloudflare again reported **10 bindings** and compatibility date `2026-10-20`.
+
+**Full seven-module source comparison:** Six modules are byte-for-byte identical to live v149 (their v149 SHA-256 hashes in the table above remain valid). Exactly one module, `semaphore.mjs`, changed with two additive lines:
+
+```diff
++  'codex/historical-minimum-records-review-20261114': '.semaphore/semaphore.yml',
++    if (command.branch === 'codex/historical-minimum-records-review-20261114' && command.commitSha !== 'a47ee0e75279d377888d408f72720eb9ffaf7cb8') throw Error('PR112 revision not permitted');
+```
+
+Its current live **SHA-256 is `d1b6073340a9f7f912c05089c33f91796d2928642f5bbacadc4f39f33f00b0d2`**, byte length **20,065**, replacing v149's `39dee9d3...` / 19,791 bytes. All six other live hashes in the table above remain unchanged. The exact `semaphore.mjs` v150 source was independently compared byte-for-byte against the updated GitHub PR #28 module *before committing*. ChurchPro's P3.1 report reader remains unchanged and retains its exact old/current successful pipeline pins.
+
+**Updated regression guard:** The branch-list test now expects the exact **12** entries from live v150 and a new PR112 test asserts: correct `codex/historical-minimum-records-review-20261114` / `a47ee0e75279d377888d408f72720eb9ffaf7cb8` routes once to Semaphore; other revisions fail before network access. Isolated actual-source V8 synthetic checks returned both expected outcomes (1 permitted mocked provider request, 0 for mismatched SHA). The older `live-v149-source-parity.test.mjs` was superseded by **`live-v150-source-parity.test.mjs`**; the new test pins all seven current v150 hashes. The new validation-only `.semaphore/semaphore.yml` now requires this v150 test file.
+
+**Safety and scope:** The source reconciliation made **no** Cloudflare deployment or bindings change. PR #28's original branch name and this document's filename remain historical identifiers; its review base is still `main`. Full Node24 CI run remains blocked until the bridge repository is registered as a Semaphore project (or a separate full checkout can run); actual local Urban Paints adapter **10/10** Node22 remains valid because the Urban module and its test did not change. PR #28 must not be merged/redeployed from the previous v149 checkpoint without this v150 source and SHA guard.
