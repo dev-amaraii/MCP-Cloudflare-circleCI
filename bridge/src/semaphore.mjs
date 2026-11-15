@@ -11,6 +11,7 @@ const SEMAPHORE_PIPELINES = Object.freeze({
   'ci/semaphore-validation-20261106': '.semaphore/semaphore.yml',
   'feat/gym-historical-service-review-20261112': '.semaphore/semaphore.yml',
   'feat/gym-historical-reconciliation-integration-20261113': '.semaphore/semaphore.yml',
+  'codex/historical-minimum-records-review-20261114': '.semaphore/semaphore.yml',
   development: '.semaphore/semaphore.yml',
   'codex/bar-bill-summary-20261107': '.semaphore/bar-bill-review.yml',
   'codex/bar-bill-staging-live-base-20261108': '.semaphore/bar-bill-review.yml',
@@ -283,6 +284,7 @@ export async function executeSemaphore(env, command, requestFn = fetch) {
   if (command.action === 'trigger') {
     if (command.branch === 'feat/gym-historical-service-review-20261112' && command.commitSha !== '43690eef91cf5fa1e35bee7257312c2cb2586f48') throw Error('PR109 revision not permitted');
     if (command.branch === 'feat/gym-historical-reconciliation-integration-20261113' && command.commitSha !== 'adc44c8f72cc4a5b861042cb0f98ea6ae48b44e8') throw Error('PR110 revision not permitted');
+    if (command.branch === 'codex/historical-minimum-records-review-20261114' && command.commitSha !== 'a47ee0e75279d377888d408f72720eb9ffaf7cb8') throw Error('PR112 revision not permitted');
     const response = await semaphoreRequest(env, '/plumber-workflows', {
       project_id:id,
       reference:'refs/heads/' + command.branch,
