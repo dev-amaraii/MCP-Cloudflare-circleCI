@@ -30,6 +30,6 @@ blocks:
         - name: Seven-module parity, command isolation and complete Node test suite
           commands:
             - test -f bridge/LIVE-V149-SOURCE-CHECKPOINT.md
-            - test -f bridge/tests/live-v149-source-parity.test.mjs
+            - test -f bridge/tests/live-v150-source-parity.test.mjs
             - for file in bridge/src/*.mjs bridge/tests/*.test.mjs; do node --check "$file" || exit 1; done
             - cd bridge && node --test tests/*.test.mjs
