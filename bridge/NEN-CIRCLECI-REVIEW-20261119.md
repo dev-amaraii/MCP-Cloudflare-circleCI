@@ -2,8 +2,30 @@
 
 **Owner:** NEN International / NEN Context OS.
 **Date:** 19 November 2026.
-**Status:** REVIEW-ONLY, **NOT DEPLOYABLE**. No live Worker code or binding changed.
+**Current status (supersedes original pre-deployment checkpoint):** **LIVE** read-only NEN CircleCI diagnostics and artifact retrieval on Cloudflare Worker `nen-ci-bridge` **version 184**, active at 100%. No NEN CircleCI trigger/release action is connected.
 **Source base:** `codex/bridge-live-v149-source-parity-20261114` at `fd72c2bb8bdaf54c5b164c868f7230d1b5986b4d`. That branch's PR #28 is independently **BLOCKED** for out-of-date live source and unexecuted Node 24 suite. The deployed `nen-ci-bridge` advanced again on 16 November. **Do not merge this branch to main or deploy its Worker.**
+
+
+## Deployed operational checkpoint — 19 November 2026
+
+The founder explicitly requested deploying NEN CircleCI inspection to reduce manual engineering work. The original review-only design and earlier blocked source-parity notes below are historical; this section supersedes their **deployment state** but not their rationale.
+
+**Deployment:** Worker `nen-ci-bridge` in Cloudflare account `9483d072db9941b23fe0bcd92d76d0d6`; current version **184**, ID `9dc2ffbc-e427-4eb7-8fdf-8df0cf56abad`; deployment `9d91c353-95cc-4549-a157-c2f801dd2e52`. Previous working rollback version **178** `c11ff3b9-14e1-4e6e-b181-700d060b49f1` remains available. All seven deployed v178 source modules were copied into this GitHub review branch without modifications before the adapter was wired in; the updated live Worker has **eight modules** (adds `circleci-nen-evidence.mjs`). All **10 original bindings** and exact secret types survived each strict-inheritance upload; only an 11th plain-text `NEN_CIRCLECI_PROJECT_SLUG` was added. Compatibility date remains `2026-10-20`. Queue/KV, existing NEN Semaphore, ChurchPro, Amaraii, Urban Paints and other adapters remain in their source shape. Worker public `fetch()` still returns 404.
+
+**Actual CircleCI identity:** The old `nen-circleci-mcp` Worker had a *different* CircleCI project slug. A restricted, read-only live NEN workflow probe proved the actual slug for `nen-website-cms` is `circleci/B65DMdC1ZhAJQM74t7SrZ1/BXo9hdM9rWK8XbkbXgGoBF`; the old slug MUST NOT be used for this website. The CircleCI GitHub App v2 pipeline responses omit `vcs.branch/revision` for these runs; therefore responses correctly set `revisionVerified=false`, `revision=null`, and no exact-SHA claim is made from CircleCI v2 alone.
+
+**Read-only private Queue commands (live and tested):**
+- `nen_ci_job_diagnostics` — verified project/workflow/job membership, failed step metadata and *sanitized condensed* stdout. A real failed NEN source job returned the previously observed `react-hooks/set-state-in-effect` error at line 192 without exposing tokens.
+- `nen_ci_artifact_list` — 42 known NEN browser artifacts were read back by their **whitelisted names only**, without signed URLs.
+- `nen_ci_artifact_report` — fetched the actual `nen-security-preview-qa/report.json`, sanitized case summaries: **44 of 44 passed, zero failures**.
+- `nen_ci_artifact_preview` — fetched actual PNG bytes using bounded (8 MB max), allowlisted HTTPS CircleCI/S3 hosts, scoped CircleCI auth and maximum three redirects; returned PNG signatures and base64 through the private KV mailbox. Real PNGs confirmed: CCTV 1,038,576 B, Access Control 1,065,459 B, Monitoring 1,026,729 B, mobile 390px dark 468,263 B. These four image captures were opened and visually inspected in-session. The three desktop hero images correspond to the correct intended physical security concepts and the mobile hero is text-first as agreed.
+- An attempted `provider=circleci, action=trigger` returned `NEN CircleCI read-only command not permitted` **before any CircleCI POST**. Existing `provider=semaphore, action=health` returned SUCCESS after deployment, with release disabled. No CI run, website publish or CMS operation was triggered by the bridge smoke tests.
+- `nen_ci_project_probe` is restricted to the two explicitly known prior NEN workflow/job pairs and returns metadata only; the live slug above was established using it.
+
+**Operational scope:** All actions use the existing authenticated Cloudflare Queue API, not a public HTTP endpoint. NEN CircleCI outputs are reduced to necessary evidence; report summaries, image names/bytes and recovered browser screenshots are accessible to an authorized agent without collecting screenshots from the founder. Circuit-breaker semantics: no automatic retries after ambiguous requests, no arbitrary project/branch/host/path, no secrets/signed URL output. Job membership and pipeline slug are verified via CircleCI v2 before API v3 reads; GitHub App v2's omission of revision is disclosed and must not be mistaken for exact deployed SHA confirmation. The bridge cannot trigger NEN CircleCI builds: the existing `run-ci` GitHub label and restricted CircleCI contexts remain the controlled execution path.
+
+**Evidence / remaining engineering follow-ups:** Cloudflare's version compiler and real-provider Queue→KV smoke tests passed, but the repository's full Node 24 bridge regression suite was not independently executed in this session. Existing mock tests need to be reconciled with the verified GitHub App payload shape and new 8 MB PNG limit before merging this draft branch. The draft PR's optional `circleci-nen.mjs` trigger design is **not deployed, not imported and not approved**. Keep the git PR open until automated regression checks and final source-parity review are complete. The NEN website PR #56 is separate and still draft/unmerged against staging; its CircleCI source and browser jobs were green at `2b44f866`, but Vercel deployed-SHA attestation remains a separate control.
+
 
 ## What is implemented
 
