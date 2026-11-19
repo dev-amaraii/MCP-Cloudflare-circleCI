@@ -205,3 +205,31 @@ export async function readCircleCiNenEvidence(env, command, requestFn=fetch) {
     failures:failed.slice(0,15).map(x=>({id:String(x.id||"").slice(0,90),
       messages:sanitize(x.failures.join("\n"))}))};
 }
+
+/** Read-only, tightly pinned identity discovery for the two founder-provided
+ *  NEN CircleCI workflows. No artifacts, logs or pipeline mutations. */
+export async function probeCircleCiNenProject(env, command, requestFn=fetch) {
+  const recognized = {
+    "40e8c61b-a100-42cb-833d-02cb3b0e0bb8":"f5db7ff8-0004-4761-aeb4-9ceadca52682",
+    "582d9151-2f67-42a7-beb8-ab1794302da8":"dd8016e8-513d-4385-b106-096b8cb71b0c",
+  };
+  deny(command?.action==="project_probe" &&
+    recognized[command.pipelineId]===command.jobId &&
+    command.project==="nen-website-cms" && command.provider==="circleci",
+    "NEN CircleCI probe not permitted");
+  const workflow=await apiJson(env,API2+"/workflow/"+command.pipelineId,requestFn);
+  deny(workflow.id===command.pipelineId && UUID.test(workflow.pipeline_id||""),
+    "NEN CircleCI workflow identity mismatch");
+  const pipeline=await apiJson(env,API2+"/pipeline/"+workflow.pipeline_id,requestFn);
+  const listing=await apiJson(env,API2+"/workflow/"+command.pipelineId+"/job",requestFn);
+  const jobs=(Array.isArray(listing.items)?listing.items:[]).filter(j=>j.id===command.jobId && JOB_NAMES.has(j.name));
+  deny(jobs.length===1,"NEN CircleCI job ownership mismatch");
+  return {project:"nen-website-cms",provider:"circleci",
+    observedProjectSlug:typeof pipeline.project_slug==="string"?pipeline.project_slug:null,
+    configuredProjectSlug:typeof env.NEN_CIRCLECI_PROJECT_SLUG==="string"?env.NEN_CIRCLECI_PROJECT_SLUG:null,
+    pipelineId:workflow.pipeline_id,workflowId:workflow.id,jobId:command.jobId,
+    jobName:jobs[0].name,jobProjectSlug:jobs[0].project_slug||null,
+    vcsBranch:pipeline.vcs?.branch||null,vcsRevision:pipeline.vcs?.revision||null,
+    pipelineFields:Object.keys(pipeline).filter(k=>["id","project_slug","project_id","vcs","state","number"].includes(k)),
+    releasePermitted:false};
+}
