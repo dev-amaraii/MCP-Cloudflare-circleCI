@@ -19,7 +19,9 @@ const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const SLUG = /^circleci\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/;
 const ARTIFACT = /^nen-security-preview-qa\/(?:report\.json|(?:home|security|solar|software|communications|about|connect|saas-and-ai|renewable-energy)[-A-Za-z0-9]*\.png)$/;
 const MAX_REPORT = 250_000;
-const MAX_PNG = 850_000;
+// Full-page responsive screenshots can be several megabytes. A strict 8 MB
+// cap still fits Cloudflare KV's 25 MiB per-value limit after base64 encoding.
+const MAX_PNG = 8_000_000;
 
 function deny(ok, message) {
   if (!ok) throw new Error(message);
