@@ -93,8 +93,15 @@ async function verifiedJob(env, command, requestFn) {
   const pipeline=await apiJson(env,API2+"/pipeline/"+workflow.pipeline_id,requestFn);
   deny(pipeline.id===workflow.pipeline_id && pipeline.project_slug===expectedSlug,
     "NEN CircleCI pipeline ownership mismatch");
-  deny(pipeline.vcs?.branch===BRANCH && SHA.test(pipeline.vcs?.revision||""),
-    "NEN CircleCI revision not permitted");
+  // GitHub App pipelines can omit 'vcs' from CircleCI v2. The NEN project
+  // slug + exact workflow/job membership are authoritative for read-only access.
+  // Never claim commit verification when CircleCI omitted revision information.
+  if (typeof pipeline.vcs?.branch==="string") {
+    deny(pipeline.vcs.branch===BRANCH,"NEN CircleCI revision not permitted");
+  }
+  if (pipeline.vcs?.revision !== undefined) {
+    deny(SHA.test(pipeline.vcs.revision),"NEN CircleCI revision not permitted");
+  }
   const listing=await apiJson(env,API2+"/workflow/"+command.pipelineId+"/job",requestFn);
   const candidates=(Array.isArray(listing.items)?listing.items:[]).filter(j=>
     j.id===command.jobId && JOB_NAMES.has(j.name) && j.project_slug===expectedSlug);
@@ -165,8 +172,11 @@ export async function readCircleCiNenEvidence(env, command, requestFn=fetch) {
   checkedCommand(command);
   const {job,pipeline}=await verifiedJob(env,command,requestFn);
   const common={project:"nen-website-cms",provider:"circleci",jobId:job.id,
-    jobName:job.name,status:job.status,revision:pipeline.vcs.revision,
-    revisionVerified:true,releasePermitted:false};
+    jobName:job.name,status:job.status,
+    revision:pipeline.vcs?.revision||null,
+    revisionVerified:typeof pipeline.vcs?.revision==="string" && SHA.test(pipeline.vcs.revision),
+    revisionSource:typeof pipeline.vcs?.revision==="string" ? "circleci_v2" : "unavailable_in_circleci_v2",
+    releasePermitted:false};
   if(command.action==="job_diagnostics"){
     const jobResponse=resource(await apiJson(env,API3+"/jobs/"+job.id,requestFn));
     deny(jobResponse.id===job.id,"NEN CircleCI job identity mismatch");
