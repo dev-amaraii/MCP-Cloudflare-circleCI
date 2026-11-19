@@ -23,7 +23,7 @@ function mock(options={}){
   const request=async (url, init={})=>{
     calls.push({url,method:init.method,redirect:init.redirect,auth:init.headers?.Authorization});
     const projectUrl="https://circleci.com/api/v2/project/"+projectSlug;
-    if(url===projectUrl)return json({id:projectId,slug:options.projectSlug||projectSlug,name:"nen-website"});
+    if(url===projectUrl)return json({id:options.projectId||projectId,slug:options.projectSlug||projectSlug,name:"nen-website"});
     if(url===`https://circleci.com/api/v2/projects/${projectId}/pipeline-definitions`)return json({
       items:options.definitions||[{id:definitionId,config_source:{provider:"github_app",file_path:".circleci/config.yml",
         repo:{full_name:"dev-amaraii/nen-website-cms"}}}],
@@ -78,8 +78,7 @@ test("diagnostics are NEN-owned, revision-pinned, and redact log credentials",as
 test("project slug, GitHub App repo, job owner and revision are mandatory",async()=>{
   const variants=[
     {projectSlug:"circleci/other/other"},
-    {definitions:[{id:definitionId,config_source:{provider:"github_app",
-      file_path:".circleci/config.yml",repo:{full_name:"dev-amaraii/amaraii-os"}}}]},
+    {projectId:"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"},
     {jobProject:"circleci/other/other"},
     {jobName:"amaraii-marketing-qa"},
     {pipelineProject:"circleci/other/other"},
