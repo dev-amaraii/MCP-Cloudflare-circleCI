@@ -12,7 +12,7 @@ import {executeSemaphoreUrban,URBAN_SEMAPHORE} from './semaphore-urban.mjs';
 import { executePr109Evidence } from './amaraii-pr109-evidence.mjs';
 import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-churchpro.mjs';
 import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_APPROVED_PREVIEWS, NEN_CMS_POLICY_44 } from './semaphore-nen.mjs';
-import {readCircleCiNenEvidence} from './circleci-nen-evidence.mjs';
+import {readCircleCiNenEvidence,probeCircleCiNenProject} from './circleci-nen-evidence.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -227,6 +227,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (command.project === 'nen-website-cms' && provider === 'circleci') {
     const actions = {
       nen_ci_job_diagnostics: 'job_diagnostics',
+      nen_ci_project_probe: 'project_probe',
       nen_ci_artifact_list: 'artifact_list',
       nen_ci_artifact_report: 'artifact_report',
       nen_ci_artifact_preview: 'artifact_png',
@@ -585,15 +586,19 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
   if (command.project === 'nen-website-cms' && command.provider === 'circleci') {
     const actions = {
       nen_ci_job_diagnostics: 'job_diagnostics',
+      nen_ci_project_probe: 'project_probe',
       nen_ci_artifact_list: 'artifact_list',
       nen_ci_artifact_report: 'artifact_report',
       nen_ci_artifact_preview: 'artifact_png',
     };
-    return readCircleCiNenEvidence(env,{
+    const task={
       project:command.project,provider:'circleci',
       action:actions[command.action],pipelineId:command.pipelineId,
       jobId:command.jobId,...(command.artifactPath===undefined?{}:{artifactPath:command.artifactPath})
-    },requestFn);
+    };
+    return command.action==='nen_ci_project_probe'
+      ? probeCircleCiNenProject(env,task,requestFn)
+      : readCircleCiNenEvidence(env,task,requestFn);
   }
   if (command.provider === 'auto') {
     const selection=selectProvider(env,command);
