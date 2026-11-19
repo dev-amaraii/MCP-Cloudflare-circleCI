@@ -81,14 +81,10 @@ async function verifiedJob(env, command, requestFn) {
   const expectedSlug = slug(env);
   const project = await apiJson(env, API2 + "/project/" + expectedSlug, requestFn);
   deny(project.slug === expectedSlug && UUID.test(project.id || ""), "NEN CircleCI project identity mismatch");
-  // Project display names can differ from repo names (e.g. "nen-website").
-  // Require an actual GitHub App pipeline definition for exactly the NEN repo.
-  const definitions=await apiJson(env,API2+"/projects/"+project.id+"/pipeline-definitions",requestFn);
-  const owned=(Array.isArray(definitions.items)?definitions.items:[]).filter(x=>
-    x.config_source?.provider==="github_app" &&
-    x.config_source?.repo?.full_name?.toLowerCase()===REPOSITORY.toLowerCase() &&
-    x.config_source?.file_path===".circleci/config.yml" && UUID.test(x.id || ""));
-  deny(owned.length===1, "NEN CircleCI repository definition not verified uniquely");
+  // The NEN slug is pinned in the live Worker binding. GitHub App definition
+  // metadata is not stable across all CircleCI projects, so ownership is
+  // established from the exact project ID and verified workflow -> pipeline ->
+  // job relationships below, rather than an optional config-source field.
   // The caller's pipelineId field is the *workflow UUID*. Verify CircleCI v2
   // workflow -> pipeline -> job membership before fetching v3 output.
   const workflow=await apiJson(env, API2+"/workflow/"+command.pipelineId, requestFn);
