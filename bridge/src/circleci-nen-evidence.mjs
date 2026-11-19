@@ -229,8 +229,14 @@ export async function readCircleCiNenEvidence(env, command, requestFn=fetch) {
   deny(json && typeof json==="object" && !Array.isArray(json), "Invalid NEN report JSON");
   const rawResults=Array.isArray(json.results)?json.results:[];
   const failed=rawResults.filter(x=>Array.isArray(x.failures)&&x.failures.length);
+  // CI runner-reported commit is useful for correlation with GitHub checks,
+  // but is NOT independently authenticated Vercel deployed-revision evidence.
+  const runnerCommit=typeof json.runnerCommit==="string" && SHA.test(json.runnerCommit)
+    ? json.runnerCommit : null;
+  const runnerBranch=json.runnerBranch===BRANCH ? BRANCH : null;
   return {...common,artifactPath:path,caseCount:rawResults.length,
     reportedCount:typeof json.count==="number"?json.count:null,
+    runnerCommit,runnerBranch,runnerProvenance:"ci_self_reported_not_deployment_attestation",
     failureCount:failed.length,
     failures:failed.slice(0,15).map(x=>({id:String(x.id||"").slice(0,90),
       messages:sanitize(x.failures.join("\n"))}))};
