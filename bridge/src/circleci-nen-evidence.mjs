@@ -81,13 +81,14 @@ async function verifiedJob(env, jobId, requestFn) {
   const expectedSlug = slug(env);
   const project = await apiJson(env, API2 + "/project/" + expectedSlug, requestFn);
   deny(project.slug === expectedSlug && UUID.test(project.id || ""), "NEN CircleCI project identity mismatch");
-  // Require repository match when available, and fail closed if no identity
-  // field is present. CircleCI GitHub App project 'vcs_url' is not always set.
-  const repository = project.vcs_url || project.repository?.full_name ||
-    project.config_source?.repo?.full_name || project.name;
-  deny(typeof repository === "string" &&
-    (repository.toLowerCase().includes(REPOSITORY.toLowerCase()) ||
-      repository.toLowerCase() === "nen-website-cms"), "NEN CircleCI repository identity mismatch");
+  // Project display names can differ from repo names (e.g. "nen-website").
+  // Require an actual GitHub App pipeline definition for exactly the NEN repo.
+  const definitions=await apiJson(env,API2+"/projects/"+project.id+"/pipeline-definitions",requestFn);
+  const owned=(Array.isArray(definitions.items)?definitions.items:[]).filter(x=>
+    x.config_source?.provider==="github_app" &&
+    x.config_source?.repo?.full_name?.toLowerCase()===REPOSITORY.toLowerCase() &&
+    x.config_source?.file_path===".circleci/config.yml" && UUID.test(x.id || ""));
+  deny(owned.length===1, "NEN CircleCI repository definition not verified uniquely");
   const job = resource(await apiJson(env, API3 + "/jobs/" + jobId, requestFn));
   deny(job.id === jobId && job.project_id === project.id && JOB_NAMES.has(job.name) &&
     UUID.test(job.pipeline_id || ""), "NEN CircleCI job ownership mismatch");
