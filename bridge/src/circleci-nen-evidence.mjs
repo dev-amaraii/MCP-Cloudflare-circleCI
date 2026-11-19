@@ -134,34 +134,52 @@ function artifactRows(payload) {
   })).filter(x=>typeof x.path==="string" && ARTIFACT.test(x.path)).slice(0,60);
 }
 function trustedArtifactUrl(value) {
-  deny(typeof value === "string", "Invalid NEN artifact URL");
-  const url=new URL(value);
-  deny(url.protocol==="https:" && url.username==="" && url.password==="" &&
-    (url.hostname==="circleci.com" || url.hostname.endsWith(".circle-artifacts.com")),
+  deny(typeof value==="string","Invalid NEN artifact URL");
+  const u=new URL(value),h=u.hostname.toLowerCase();
+  deny(u.protocol==="https:" && !u.username && !u.password && !u.port &&
+    (h==="circleci.com" || h==="circle-artifacts.com" ||
+      h.endsWith(".circle-artifacts.com") ||
+      h==="circleci-tasks-prod.s3.us-east-1.amazonaws.com" ||
+      h==="s3.amazonaws.com" || h.endsWith(".s3.amazonaws.com")),
     "NEN artifact host not permitted");
-  return url;
+  return u;
 }
 async function boundedArtifact(env, url, max, requestFn) {
-  const target=trustedArtifactUrl(url);
-  const headers=target.hostname==="circleci.com" ? apiHeaders(env) : {Accept:"application/octet-stream"};
-  const response=await requestFn(target.href, {method:"GET",redirect:"manual",headers});
-  if (!response.ok) throw new Error("NEN artifact HTTP " + response.status);
-  const length=Number(response.headers?.get?.("content-length") || 0);
-  deny(!length || length<=max, "NEN artifact exceeds byte limit");
-  deny(response.body?.getReader, "NEN artifact streaming required");
-  const reader=response.body.getReader(),chunks=[]; let total=0;
-  try {
-    for(;;) {
-      const next=await reader.read();
-      if(next.done)break;
-      total+=next.value.byteLength;
-      if(total>max) throw new Error("NEN artifact exceeds byte limit");
-      chunks.push(next.value);
+  let target=trustedArtifactUrl(url);
+  for(let redirects=0;redirects<3;redirects++) {
+    const trusted=target.hostname==="circleci.com" ||
+      target.hostname==="circle-artifacts.com" ||
+      target.hostname.endsWith(".circle-artifacts.com");
+    // Never send CircleCI credentials to redirected S3/other hosts.
+    const headers=trusted ? {"Circle-Token":token(env),Accept:"application/octet-stream"}
+      : {Accept:"application/octet-stream"};
+    const response=await requestFn(target.href,{method:"GET",redirect:"manual",headers});
+    if([301,302,303,307,308].includes(response.status)) {
+      const location=response.headers.get("location");
+      deny(!!location,"Artifact download failed");
+      target=trustedArtifactUrl(new URL(location,target).href);
+      continue;
     }
-  } finally {await reader.cancel().catch(()=>{});}
-  const result=new Uint8Array(total);let offset=0;
-  for(const chunk of chunks) {result.set(chunk,offset);offset+=chunk.byteLength;}
-  return result;
+    deny(response.ok && !!response.body,"Artifact download failed");
+    const length=Number(response.headers.get("content-length")||0);
+    deny(!length||length<=max,"NEN artifact exceeds byte limit");
+    deny(typeof response.body.getReader==="function","NEN artifact streaming required");
+    const reader=response.body.getReader(),chunks=[];let total=0;
+    try {
+      for(;;) {
+        const next=await reader.read();
+        if(next.done)break;
+        total+=next.value.byteLength;
+        deny(total<=max,"NEN artifact exceeds byte limit");
+        chunks.push(next.value);
+      }
+    } finally {await reader.cancel().catch(()=>{});}
+    deny(total>0,"Artifact download failed");
+    const result=new Uint8Array(total);let offset=0;
+    for(const part of chunks){result.set(part,offset);offset+=part.byteLength;}
+    return result;
+  }
+  throw Error("Artifact download failed");
 }
 function toBase64(bytes) {
   let raw="";
