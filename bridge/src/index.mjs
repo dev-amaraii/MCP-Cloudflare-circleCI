@@ -12,6 +12,7 @@ import {executeSemaphoreUrban,URBAN_SEMAPHORE} from './semaphore-urban.mjs';
 import { executePr109Evidence } from './amaraii-pr109-evidence.mjs';
 import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-churchpro.mjs';
 import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_APPROVED_PREVIEWS, NEN_CMS_POLICY_44 } from './semaphore-nen.mjs';
+import {readCircleCiNenEvidence} from './circleci-nen-evidence.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -221,6 +222,28 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (!['circleci','semaphore','auto'].includes(provider)) throw new Error('CI provider not permitted');
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
+  // CircleCI access for NEN is strictly READ-ONLY and scoped to reviewed
+  // Security QA jobs. Existing NEN Semaphore approvals are unaffected.
+  if (command.project === 'nen-website-cms' && provider === 'circleci') {
+    const actions = {
+      nen_ci_job_diagnostics: 'job_diagnostics',
+      nen_ci_artifact_list: 'artifact_list',
+      nen_ci_artifact_report: 'artifact_report',
+      nen_ci_artifact_preview: 'artifact_png',
+    };
+    if (!Object.hasOwn(actions, command.action) ||
+        !UUID.test(command.pipelineId || '') || !UUID.test(command.jobId || '') ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined ||
+        (command.action === 'nen_ci_artifact_preview'
+          ? !(typeof command.artifactPath === 'string' &&
+              /^nen-security-preview-qa\/(?:home|security|solar|software|communications|about|connect|saas-and-ai|renewable-energy)[-A-Za-z0-9]*\.png$/.test(command.artifactPath))
+          : command.artifactPath !== undefined)) {
+      throw new Error('NEN CircleCI read-only command not permitted');
+    }
+    return {command,project};
+  }
   if (command.project === 'nen-website-cms' && provider !== 'semaphore') {
     throw new Error('NEN website is Semaphore-only');
   }
@@ -559,6 +582,19 @@ async function resolveDefinitionId(env, project, requestFn) {
 }
 
 export async function executeCommand(env, command, project, requestFn = fetch) {
+  if (command.project === 'nen-website-cms' && command.provider === 'circleci') {
+    const actions = {
+      nen_ci_job_diagnostics: 'job_diagnostics',
+      nen_ci_artifact_list: 'artifact_list',
+      nen_ci_artifact_report: 'artifact_report',
+      nen_ci_artifact_preview: 'artifact_png',
+    };
+    return readCircleCiNenEvidence(env,{
+      project:command.project,provider:'circleci',
+      action:actions[command.action],pipelineId:command.pipelineId,
+      jobId:command.jobId,...(command.artifactPath===undefined?{}:{artifactPath:command.artifactPath})
+    },requestFn);
+  }
   if (command.provider === 'auto') {
     const selection=selectProvider(env,command);
     if (command.action === 'route') return {
@@ -934,6 +970,14 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
        'Semaphore project not configured', 'Semaphore token not configured',
        'Semaphore project mismatch', 'Invalid Semaphore response',
        'NEN Semaphore project not configured', 'NEN Semaphore pipeline ownership mismatch', 'Malformed Semaphore response',
+        'NEN CircleCI read-only command not permitted', 'NEN CircleCI project not configured',
+        'NEN CircleCI project identity mismatch', 'NEN CircleCI repository definition not verified uniquely',
+        'NEN CircleCI workflow identity mismatch', 'NEN CircleCI job ownership mismatch',
+        'NEN CircleCI pipeline ownership mismatch', 'NEN CircleCI revision not permitted',
+        'NEN CircleCI job identity mismatch', 'NEN artifact not present',
+        'NEN artifact host not permitted','NEN artifact exceeds byte limit',
+        'NEN artifact streaming required','NEN PNG signature mismatch',
+        'Invalid NEN artifact URL','Invalid CircleCI JSON','Invalid CircleCI artifacts response',
        'NEN Semaphore project identity mismatch', 'NEN Semaphore pipeline identity mismatch',
        'NEN Semaphore workflow identity missing', 'NEN Semaphore detailed pipeline identity mismatch',
        'NEN Semaphore detailed job blocks missing', 'NEN preview revision not permitted', 'Invalid NEN preview workflow response',
