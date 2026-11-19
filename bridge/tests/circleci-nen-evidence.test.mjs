@@ -108,7 +108,7 @@ test("report reader returns bounded sanitized failures rather than raw report",a
   assert.equal(result.caseCount,2);
   assert.equal(result.failureCount,1);
   assert.equal(result.failures[0].id,"security-320-dark");
-  assert.match(result.failures[0].messages.join(" "),"hero overflow");
+  assert.match(result.failures[0].messages.join(" "),/hero overflow/);
   assert.equal(JSON.stringify(result).includes("circle-artifacts.com"),false);
   assert.equal(m.calls.filter(x=>x.url===artifactUrl).length,1);
   assert.equal(m.calls.find(x=>x.url===artifactUrl).auth,undefined);
