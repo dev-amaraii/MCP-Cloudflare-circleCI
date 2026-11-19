@@ -227,7 +227,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (command.project === 'urban-design-paint' && provider !== 'semaphore') throw Error('Urban Paints is Semaphore-only');
   if (provider === 'semaphore' && !(
       (command.project === 'amaraii-os' &&
-        ['health','trigger','inspect','semaphore_artifacts','semaphore_png','pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action)) ||
+        ['health','trigger','inspect','semaphore_artifacts','semaphore_png','semaphore_report','pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action)) ||
       (command.project === 'churchpro' &&
         ['health','trigger','inspect','churchpro_report','churchpro_artifact_probe','churchpro_png'].includes(command.action)) ||
       (command.project === 'nen-website-cms' &&
@@ -333,6 +333,8 @@ export function validateCommand(command, keyId, now = Date.now()) {
       }
       if (command.project === 'amaraii-os' && command.branch === 'feat/gym-historical-service-review-20261112' && command.commitSha !== '43690eef91cf5fa1e35bee7257312c2cb2586f48') throw Error('PR109 revision not permitted');
       if (command.project === 'amaraii-os' && command.branch === 'feat/gym-historical-reconciliation-integration-20261113' && command.commitSha !== 'adc44c8f72cc4a5b861042cb0f98ea6ae48b44e8') throw Error('PR110 revision not permitted');
+      if (command.project === 'amaraii-os' && command.branch === 'codex/gym-editable-membership-dates-implementation-20261115' && command.commitSha !== 'efa5ecf3970a7e6788ea36b03a6895256c3b7bd5') throw Error('PR114 revision not permitted');
+      if (command.project === 'amaraii-os' && command.branch === 'codex/gym-history-date-fixes-20261116' && command.commitSha !== 'da9d7eb19251d9ff6fe739b87c8430feac718af9') throw Error('PR115 revision not permitted');
     } else if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) {
       throw new Error('Pipeline mode not permitted');
     }
@@ -437,10 +439,16 @@ export function validateCommand(command, keyId, now = Date.now()) {
     }
     return {command,project};
   }
+  if(command.action==='semaphore_report'){
+    if(provider!=='semaphore'||command.project!=='amaraii-os'||!UUID.test(command.pipelineId||'')||
+       !['historical-service/REPORT.md','historical-service/qa-intel/run.json','gym-editable-dates/qa-intel-summary.json'].includes(command.artifactPath)||
+       ['branch','mode','commitSha','jobId','jobNumber','startNumber'].some(k=>command[k]!==undefined))throw Error('PR112 report not permitted');
+    return {command,project};
+  }
   if (command.action === 'semaphore_png') {
     if (provider!=='semaphore' || typeof command.pipelineId!=='string' || !UUID.test(command.pipelineId) ||
       typeof command.artifactPath!=='string' ||
-      !/^qa-intel\/screenshots\/(?:screenshots\/)?[A-Za-z0-9_-]{1,110}\.png$/.test(command.artifactPath) ||
+      !( /^qa-intel\/screenshots\/(?:screenshots\/)?[A-Za-z0-9_-]{1,110}\.png$/.test(command.artifactPath) || /^historical-service\/screenshots\/(?:source-(?:evidence|review|holds)|legacy-history-(?:import|preview|actions-fallback)|integrated-archive-(?:preview|import|profile|expired)|manager-mapping|historical-service)-(?:320|390|1280)\.png$/.test(command.artifactPath) || /^gym-editable-dates\/screenshots\/(?:correction-preview|correction-confirmation|saved-amendment)-(?:1280|390|320)\.png$/.test(command.artifactPath) ) ||
       command.branch!==undefined||command.mode!==undefined||command.commitSha!==undefined||
       command.jobId!==undefined||command.jobNumber!==undefined||command.startNumber!==undefined)
       throw new Error('Semaphore artifact preview not permitted');
@@ -448,7 +456,8 @@ export function validateCommand(command, keyId, now = Date.now()) {
   }
   if (command.action === 'semaphore_artifacts') {
     const dirs=['qa-intel','qa-intel/survey-report','qa-intel/survey-findings',
-      'qa-intel/survey-results-db','qa-intel/screenshots','qa-intel/visual','qa-intel/survey-screenshots'];
+      'qa-intel/survey-results-db','qa-intel/screenshots','qa-intel/visual','qa-intel/survey-screenshots',
+      'historical-service','historical-service/screenshots','historical-service/qa-intel','gym-editable-dates','gym-editable-dates/screenshots'];
     if (provider!=='semaphore' || typeof command.pipelineId!=='string' || !UUID.test(command.pipelineId) ||
         (command.jobId!==undefined && (typeof command.jobId!=='string'||!UUID.test(command.jobId))) ||
         (command.artifactPath!==undefined && !dirs.includes(command.artifactPath)) ||
