@@ -9,12 +9,14 @@
  * The GitHub App trigger is BRANCH-based, not SHA-pinned; any subsequent result
  * MUST be independently inspected against its exact expected revision.
  */
+import {readCircleCiNenEvidence} from "./circleci-nen-evidence.mjs";
+
 const CIRCLE_API = "https://circleci.com/api/v2";
 const PROJECT = "nen-website-cms";
 const REPOSITORY = "dev-amaraii/nen-website-cms";
 const CONFIG_PATH = ".circleci/config.yml";
 const BRANCH = "codex/nen-approved-overview-hero-20261118";
-const REVIEW_SHA = "8c818968da6be860ba0e6c4012895b7e2d5331f5";
+const REVIEW_SHA = "7b9f3ff8d9cf906d4a9df6578d54ddfe44c29d9f";
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const SLUG = /^circleci\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/;
 
@@ -92,6 +94,11 @@ function validatedCommand(command) {
 }
 /** An isolated adapter for future integration once live source parity is green. */
 export async function executeCircleCiNen(env, command, requestFn = fetch) {
+  // The evidence reader verifies its own strict command schema, real project
+  // identity, job ownership and pinned revision before returning anything.
+  if (["job_diagnostics", "artifact_list", "artifact_report", "artifact_png"].includes(command?.action)) {
+    return readCircleCiNenEvidence(env, command, requestFn);
+  }
   validatedCommand(command);
   if (command.action === "health") return {
     project: PROJECT, provider: "circleci",
