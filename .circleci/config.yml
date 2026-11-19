@@ -1,0 +1,46 @@
+# NEN International: source-only validation for the shared CI bridge.
+# CircleCI is the primary CI runner. No contexts, provider tokens, deployment,
+# Cloudflare uploads, GitHub release writes, or CMS access are used by this job.
+version: 2.1
+
+jobs:
+  bridge-node24-regression:
+    docker:
+      - image: cimg/node:24.21.0
+    resource_class: medium
+    environment:
+      CI: "true"
+      NODE_ENV: "test"
+    steps:
+      - checkout
+      - run:
+          name: Confirm immutable checkout and Node 24
+          command: |
+            set -euo pipefail
+            test -n "${CIRCLE_SHA1:-}" || { echo "CIRCLECI_SHA_REQUIRED"; exit 1; }
+            test "$(git rev-parse HEAD)" = "$CIRCLE_SHA1" || { echo "CHECKOUT_SHA_MISMATCH"; exit 1; }
+            test "$(node -p 'process.versions.node.split(".")[0]')" = "24" || { echo "NODE24_REQUIRED"; exit 1; }
+            node --version
+      - run:
+          name: Check all bridge source and test syntax
+          command: |
+            set -euo pipefail
+            test -f bridge/LIVE-V149-SOURCE-CHECKPOINT.md
+            test -f bridge/tests/live-v150-source-parity.test.mjs
+            for file in bridge/src/*.mjs bridge/tests/*.test.mjs; do
+              node --check "$file"
+            done
+      - run:
+          name: Run the complete bridge Node 24 regression suite
+          command: |
+            set -euo pipefail
+            mkdir -p qa-artifacts/nen-ci-bridge
+            (cd bridge && node --test tests/*.test.mjs) 2>&1 | tee qa-artifacts/nen-ci-bridge/node24-full-suite.log
+      - store_artifacts:
+          path: qa-artifacts/nen-ci-bridge
+          destination: nen-ci-bridge-node24
+
+workflows:
+  bridge-source-review:
+    jobs:
+      - bridge-node24-regression
