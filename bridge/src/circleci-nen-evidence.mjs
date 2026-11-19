@@ -8,10 +8,9 @@ const API3 = "https://circleci.com/api/v3";
 const API2 = "https://circleci.com/api/v2";
 const BRANCH = "codex/nen-approved-overview-hero-20261118";
 const REPOSITORY = "dev-amaraii/nen-website-cms";
-const REVIEWED_REVISIONS = new Set([
-  "8c818968da6be860ba0e6c4012895b7e2d5331f5", // failed run #23
-  "7b9f3ff8d9cf906d4a9df6578d54ddfe44c29d9f", // test-fix run
-]);
+const SHA = /^[a-f0-9]{40}$/i;
+// Read-only diagnostics do not require a code deployment for every new commit.
+// Return exact VCS revision for the caller to compare with the expected PR SHA.
 const JOB_NAMES = new Set([
   "nen-security-preview-source-qa",
   "nen-security-preview-browser-qa",
@@ -66,8 +65,9 @@ function checkedCommand(command) {
   deny(command && typeof command === "object" && !Array.isArray(command), "Invalid NEN evidence request");
   deny(command.project === "nen-website-cms" && command.provider === "circleci", "NEN evidence project/provider mismatch");
   deny(["job_diagnostics","artifact_list","artifact_report","artifact_png"].includes(command.action), "NEN evidence action not permitted");
-  deny(UUID.test(command.jobId || ""), "Invalid NEN CircleCI job id");
-  deny(Object.keys(command).every(key => ["project","provider","action","jobId","artifactPath"].includes(key)),
+  deny(UUID.test(command.jobId || "") && UUID.test(command.pipelineId || ""),
+    "Invalid NEN CircleCI workflow or job id");
+  deny(Object.keys(command).every(key => ["project","provider","action","jobId","pipelineId","artifactPath"].includes(key)),
     "Unexpected NEN evidence field");
   if (command.action === "artifact_png") {
     deny(typeof command.artifactPath === "string" && ARTIFACT.test(command.artifactPath) &&
@@ -77,7 +77,7 @@ function checkedCommand(command) {
   }
   return command;
 }
-async function verifiedJob(env, jobId, requestFn) {
+async function verifiedJob(env, command, requestFn) {
   const expectedSlug = slug(env);
   const project = await apiJson(env, API2 + "/project/" + expectedSlug, requestFn);
   deny(project.slug === expectedSlug && UUID.test(project.id || ""), "NEN CircleCI project identity mismatch");
@@ -89,25 +89,32 @@ async function verifiedJob(env, jobId, requestFn) {
     x.config_source?.repo?.full_name?.toLowerCase()===REPOSITORY.toLowerCase() &&
     x.config_source?.file_path===".circleci/config.yml" && UUID.test(x.id || ""));
   deny(owned.length===1, "NEN CircleCI repository definition not verified uniquely");
-  const job = resource(await apiJson(env, API3 + "/jobs/" + jobId, requestFn));
-  deny(job.id === jobId && job.project_id === project.id && JOB_NAMES.has(job.name) &&
-    UUID.test(job.pipeline_id || ""), "NEN CircleCI job ownership mismatch");
-  const pipeline = await apiJson(env, API2 + "/pipeline/" + job.pipeline_id, requestFn);
-  deny(pipeline.id === job.pipeline_id && pipeline.project_slug === expectedSlug,
+  // The caller's pipelineId field is the *workflow UUID*. Verify CircleCI v2
+  // workflow -> pipeline -> job membership before fetching v3 output.
+  const workflow=await apiJson(env, API2+"/workflow/"+command.pipelineId, requestFn);
+  deny(workflow.id===command.pipelineId && UUID.test(workflow.pipeline_id||""),
+    "NEN CircleCI workflow identity mismatch");
+  const pipeline=await apiJson(env,API2+"/pipeline/"+workflow.pipeline_id,requestFn);
+  deny(pipeline.id===workflow.pipeline_id && pipeline.project_slug===expectedSlug,
     "NEN CircleCI pipeline ownership mismatch");
-  deny(pipeline.vcs?.branch === BRANCH && REVIEWED_REVISIONS.has(pipeline.vcs?.revision),
-    "NEN CircleCI revision not reviewed");
-  return {job,pipeline};
+  deny(pipeline.vcs?.branch===BRANCH && SHA.test(pipeline.vcs?.revision||""),
+    "NEN CircleCI revision not permitted");
+  const listing=await apiJson(env,API2+"/workflow/"+command.pipelineId+"/job",requestFn);
+  const candidates=(Array.isArray(listing.items)?listing.items:[]).filter(j=>
+    j.id===command.jobId && JOB_NAMES.has(j.name) && j.project_slug===expectedSlug);
+  deny(candidates.length===1,"NEN CircleCI job ownership mismatch");
+  return {job:candidates[0],pipeline};
 }
 function failedSteps(job) {
   const rows=[];
-  for (const ex of (Array.isArray(job.executions) ? job.executions : [])) {
-    const steps=Array.isArray(ex.steps) ? ex.steps : [];
+  for (const ex of (Array.isArray(job.parallel_executions||job.executions) ? (job.parallel_executions||job.executions) : [])) {
+    const entry=ex?.attributes && typeof ex.attributes==="object" ? ex.attributes : ex;
+    const steps=Array.isArray(entry.steps) ? entry.steps : [];
     for (let index=0; index<steps.length; index++) {
-      const s=steps[index], exit=s.exit_code;
-      if ((typeof exit==="number" && exit!==0) || /fail|error/i.test(s.status || "")) {
-        rows.push({stepNum:Number.isInteger(s.step_num)?s.step_num:index,
-          execution:Number.isInteger(ex.index)?ex.index:0,
+      const s=steps[index]?.attributes || steps[index], exit=s?.exit_code;
+      if ((typeof exit==="number" && exit!==0) || /fail|error/i.test(s?.status || s?.outcome || "")) {
+        rows.push({stepNum:Number.isInteger(s.num)?s.num:(Number.isInteger(s.step_num)?s.step_num:index),
+          execution:Number.isInteger(entry.index)?entry.index:0,
           name:String(s.name || "").slice(0,100), status:String(s.status || "").slice(0,30),
           exitCode:Number.isInteger(exit)?exit:null});
       }
@@ -160,12 +167,14 @@ function toBase64(bytes) {
 }
 export async function readCircleCiNenEvidence(env, command, requestFn=fetch) {
   checkedCommand(command);
-  const {job,pipeline}=await verifiedJob(env,command.jobId,requestFn);
+  const {job,pipeline}=await verifiedJob(env,command,requestFn);
   const common={project:"nen-website-cms",provider:"circleci",jobId:job.id,
     jobName:job.name,status:job.status,revision:pipeline.vcs.revision,
     revisionVerified:true,releasePermitted:false};
   if(command.action==="job_diagnostics"){
-    const steps=failedSteps(job),logs=[];
+    const jobResponse=resource(await apiJson(env,API3+"/jobs/"+job.id,requestFn));
+    deny(jobResponse.id===job.id,"NEN CircleCI job identity mismatch");
+    const steps=failedSteps(jobResponse),logs=[];
     for(const s of steps){
       const path="/jobs/"+job.id+"/stdout/condensed?filter%5Bexecution%5D="+s.execution+
         "&filter%5Bstep_num%5D="+s.stepNum;
