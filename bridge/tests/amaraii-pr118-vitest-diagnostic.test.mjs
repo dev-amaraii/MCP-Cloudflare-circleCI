@@ -40,8 +40,8 @@ test('one exact Amaraii pipeline/job/step receives sanitized assertion, no other
    if(url.endsWith('/pipeline/'+pipelineId)) return Response.json({project_slug:PROJECTS['amaraii-os'].slug});
    if(url.endsWith('/pipeline/'+pipelineId+'/workflow')) return Response.json({items:[{id:'11111111-2222-4333-8444-555555555555'}]});
    if(url.endsWith('/workflow/11111111-2222-4333-8444-555555555555/job'))return Response.json({items:[{id:props.jobId??jobId,job_number:props.jobNumber??312,project_slug:PROJECTS['amaraii-os'].slug}]});
-   if(url.includes('/api/v3/jobs/'))return Response.json({data:{id:props.jobId??jobId,attributes:{status:'failed',parallel_executions:[{attributes:{index:0,steps:[{attributes:{num:143,outcome:'failed',exit_code:1,name:'Workspace and branch region regressions'}}]}}]}}});
    if(url.includes('/stdout/condensed'))return new Response(fakeOutput,{status:200});
+   if(url.includes('/api/v3/jobs/'))return Response.json({data:{id:props.jobId??jobId,attributes:{status:'failed',parallel_executions:[{attributes:{index:0,steps:[{attributes:{num:143,outcome:'failed',exit_code:1,name:'Workspace and branch region regressions'}}]}}]}}});
    throw Error('Unexpected call '+url);
   });
   assert.equal(calls.length,5);
