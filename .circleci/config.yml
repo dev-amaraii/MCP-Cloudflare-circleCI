@@ -124,9 +124,27 @@ workflows:
           requires:
             - bridge-preflight
       - bridge-test-group:
-          name: bridge-amaraii-adapter
-          group: amaraii-adapter
-          files: "tests/amaraii-pr109-evidence.test.mjs"
+          name: bridge-amaraii-readers
+          group: amaraii-readers
+          files: "--test-name-pattern='^(reads only|discovers only|lists only|returns a checked|returns a bounded|admits bounded)' tests/amaraii-pr109-evidence.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-amaraii-denials
+          group: amaraii-denials
+          files: "--test-name-pattern='^(rejects scope|rejects wrong|rejects untrusted|cannot act)' tests/amaraii-pr109-evidence.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-amaraii-queue
+          group: amaraii-queue
+          files: "--test-name-pattern='^(Queue validator|retired PR110)' tests/amaraii-pr109-evidence.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-amaraii-pins
+          group: amaraii-pins
+          files: "--test-name-pattern='^(PR110 integration|PR109 Semaphore)' tests/amaraii-pr109-evidence.test.mjs"
           requires:
             - bridge-preflight
       - bridge-test-group:
@@ -143,5 +161,8 @@ workflows:
             - bridge-semaphore-nen
             - bridge-churchpro-semaphore
             - bridge-churchpro-pin
-            - bridge-amaraii-adapter
+            - bridge-amaraii-readers
+            - bridge-amaraii-denials
+            - bridge-amaraii-queue
+            - bridge-amaraii-pins
             - bridge-urban-adapter
