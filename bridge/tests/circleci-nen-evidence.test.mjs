@@ -43,7 +43,7 @@ function mock(options={}){
     });
     if(url===`https://circleci.com/api/v2/pipeline/${pipelineId}`)return json({
       id:pipelineId,project_slug:options.pipelineProject||projectSlug,
-      vcs:{branch:options.branch||branch,revision:options.revision||revision},
+      ...(options.omitVcs?{}:{vcs:{branch:options.branch||branch,revision:options.revision||revision}}),
     });
     if(url.includes("/stdout/condensed?")) return new Response(
       "AssertionError: Approved Cloudinary asset missing: security_irqhzc.webp\n" +
@@ -75,10 +75,10 @@ test("diagnostics are NEN-owned, revision-pinned, and redact log credentials",as
   assert.equal(m.calls.filter(x=>x.url.includes("/stdout/condensed")).length,1);
   assert.ok(m.calls.every(x=>x.method==="GET" && x.redirect==="manual"));
 });
-test("project slug, GitHub App repo, job owner and revision are mandatory",async()=>{
+test("project slug, valid project UUID, job owner and provided revision are checked",async()=>{
   const variants=[
     {projectSlug:"circleci/other/other"},
-    {projectId:"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"},
+    {projectId:"not-a-uuid"},
     {jobProject:"circleci/other/other"},
     {jobName:"amaraii-marketing-qa"},
     {pipelineProject:"circleci/other/other"},
@@ -90,6 +90,13 @@ test("project slug, GitHub App repo, job owner and revision are mandatory",async
     await assert.rejects(()=>readCircleCiNenEvidence(env,cmd("job_diagnostics"),m.request));
     assert.equal(m.calls.some(y=>y.url.includes("/stdout/condensed")),false);
   }
+});
+test("v2 GitHub App pipelines without vcs never falsely verify a revision",async()=>{
+  const m=mock({omitVcs:true});
+  const result=await readCircleCiNenEvidence(env,cmd("job_diagnostics"),m.request);
+  assert.equal(result.revision,null);
+  assert.equal(result.revisionVerified,false);
+  assert.equal(result.revisionSource,"unavailable_in_circleci_v2");
 });
 test("arbitrary action/path/URL never reaches CircleCI",async()=>{
   const m=mock();
