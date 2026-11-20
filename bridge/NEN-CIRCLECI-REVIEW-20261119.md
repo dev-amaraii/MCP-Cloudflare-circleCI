@@ -1,5 +1,18 @@
 # NEN CircleCI bridge adapter — isolated review checkpoint
 
+## 20 November 2026 — Main integration preparation (latest source state)
+
+**Read-only release scope:** NEN's CircleCI evidence module is active in Cloudflare Worker v185. The full Node 24 regression suite and the six associated CircleCI jobs passed at reviewed commit `712496019649ed247cdffa283381918bc290d322`. No live Worker upgrade, website deploy, CMS write, or production change accompanied these source tests.
+
+**Exact live source reconciliation:** Re-read Cloudflare's active content/v2 and deployment on 20 November: eight module SHA-256 hashes and lengths all match the repository's v185 parity test manifest, active deployment `f3d70754-1635-48de-80f5-0b4ed247e69d` at 100%. Eleven binding names/types remain, including the existing KV Queue and `CIRCLE_TOKEN`/`SEMAPHORE_TOKEN` as `secret_text`; values were not read. The repository's shared bridge entrypoint remains `bridge/src/index.mjs` via `bridge/wrangler.toml`. The separate root `wrangler.toml` deploys `nen-circleci-mcp` and must never be confused with the shared bridge.
+
+**Defense-in-depth cleanup:** The optional, unused POST-capable `bridge/src/circleci-nen.mjs` prototype and its `bridge/tests/circleci-nen-review.test.mjs` test file were **deleted from the review branch**, because NEN's approved integration is strictly read-only. The deployed module `bridge/src/circleci-nen-evidence.mjs` and live Worker were not modified; CircleCI now tests only the deployed read-only adapter. Any references below to the trigger prototype describe an **obsolete historical proposal**, not files present in the current review branch.
+
+**Integration boundary:** Repository `main` is older than the v185 Worker (five of eight live modules are absent and existing entrypoint/Semaphore adapter differ). Do not merge older PR #28 by itself. PR #29 contains the live v185 source snapshot and can be retargeted directly to `main` as a **draft**, followed by a fresh exact-head `run-ci` validation and independent diff/permission review. Merging or deploying is a separate, gated decision. The prior portions of this document are preserved as dated historical evidence.
+
+---
+
+
 **Owner:** NEN International / NEN Context OS.
 **Date:** 19 November 2026.
 **Current status (supersedes original pre-deployment checkpoint):** **LIVE** read-only NEN CircleCI diagnostics and artifact retrieval on Cloudflare Worker `nen-ci-bridge` **version 185**, active at 100%. No NEN CircleCI trigger/release action is connected.
