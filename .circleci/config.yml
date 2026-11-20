@@ -100,69 +100,20 @@ workflows:
           requires:
             - bridge-preflight
       - bridge-test-group:
-          name: bridge-semaphore-core
-          group: semaphore-core
-          files: "tests/semaphore.test.mjs"
+          name: bridge-semaphore-adapters
+          group: semaphore-adapters
+          files: "tests/semaphore.test.mjs tests/semaphore-nen.test.mjs tests/churchpro-semaphore.test.mjs tests/churchpro-v149-pin.test.mjs"
           requires:
             - bridge-preflight
       - bridge-test-group:
-          name: bridge-semaphore-nen
-          group: semaphore-nen
-          files: "tests/semaphore-nen.test.mjs"
-          requires:
-            - bridge-preflight
-      - bridge-test-group:
-          name: bridge-churchpro-semaphore
-          group: churchpro-semaphore
-          files: "tests/churchpro-semaphore.test.mjs"
-          requires:
-            - bridge-preflight
-      - bridge-test-group:
-          name: bridge-churchpro-pin
-          group: churchpro-pin
-          files: "tests/churchpro-v149-pin.test.mjs"
-          requires:
-            - bridge-preflight
-      - bridge-test-group:
-          name: bridge-amaraii-readers
-          group: amaraii-readers
-          files: "--test-name-pattern='^(reads only|discovers only|lists only|returns a checked|returns a bounded|admits bounded)' tests/amaraii-pr109-evidence.test.mjs"
-          requires:
-            - bridge-preflight
-      - bridge-test-group:
-          name: bridge-amaraii-denials
-          group: amaraii-denials
-          files: "--test-name-pattern='^(rejects scope|rejects wrong|rejects untrusted|cannot act)' tests/amaraii-pr109-evidence.test.mjs"
-          requires:
-            - bridge-preflight
-      - bridge-test-group:
-          name: bridge-amaraii-queue
-          group: amaraii-queue
-          files: "--test-name-pattern='^(Queue validator|retired PR110)' tests/amaraii-pr109-evidence.test.mjs"
-          requires:
-            - bridge-preflight
-      - bridge-test-group:
-          name: bridge-amaraii-pins
-          group: amaraii-pins
-          files: "--test-name-pattern='^(PR110 integration|PR109 Semaphore)' tests/amaraii-pr109-evidence.test.mjs"
-          requires:
-            - bridge-preflight
-      - bridge-test-group:
-          name: bridge-urban-adapter
-          group: urban-adapter
-          files: "tests/urban-paints.test.mjs"
+          name: bridge-other-adapters
+          group: other-adapters
+          files: "tests/amaraii-pr109-evidence.test.mjs tests/urban-paints.test.mjs"
           requires:
             - bridge-preflight
       - bridge-node24-regression:
           requires:
             - bridge-security-parity
             - bridge-circleci-adapters
-            - bridge-semaphore-core
-            - bridge-semaphore-nen
-            - bridge-churchpro-semaphore
-            - bridge-churchpro-pin
-            - bridge-amaraii-readers
-            - bridge-amaraii-denials
-            - bridge-amaraii-queue
-            - bridge-amaraii-pins
-            - bridge-urban-adapter
+            - bridge-semaphore-adapters
+            - bridge-other-adapters
