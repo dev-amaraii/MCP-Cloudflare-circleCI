@@ -8,6 +8,11 @@
  * workflow; QA completion gates the dedicated Pages deployment job.
  */
 import { executeSemaphore, SEMAPHORE_BRANCHES } from './semaphore.mjs';
+import {executeSemaphoreUrban,URBAN_SEMAPHORE} from './semaphore-urban.mjs';
+import { executePr109Evidence } from './amaraii-pr109-evidence.mjs';
+import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-churchpro.mjs';
+import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_APPROVED_PREVIEWS, NEN_CMS_POLICY_44 } from './semaphore-nen.mjs';
+import {readCircleCiNenEvidence,probeCircleCiNenProject} from './circleci-nen-evidence.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -158,6 +163,11 @@ async function downloadChurchproReport(env, urlValue, requestFn = fetch) {
 }
 
 export const PROJECTS = Object.freeze({
+  'urban-design-paint': Object.freeze({branches:[],modes:Object.freeze({})}),
+  'nen-website-cms': Object.freeze({
+    // Explicit Semaphore-only: no CircleCI project slug or release mode.
+    branches: [], modes: Object.freeze({}),
+  }),
   churchpro: Object.freeze({
     slug: 'circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu',
     // Resolve the existing GitHub App definition by identity; never guess an ID.
@@ -212,9 +222,114 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (!['circleci','semaphore','auto'].includes(provider)) throw new Error('CI provider not permitted');
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
-  if (provider === 'semaphore' &&
-      (command.project !== 'amaraii-os' || !['health','trigger','inspect'].includes(command.action))) {
+  // CircleCI access for NEN is strictly READ-ONLY and scoped to reviewed
+  // Security QA jobs. Existing NEN Semaphore approvals are unaffected.
+  if (command.project === 'nen-website-cms' && provider === 'circleci') {
+    const actions = {
+      nen_ci_job_diagnostics: 'job_diagnostics',
+      nen_ci_project_probe: 'project_probe',
+      nen_ci_artifact_list: 'artifact_list',
+      nen_ci_artifact_report: 'artifact_report',
+      nen_ci_artifact_preview: 'artifact_png',
+    };
+    if (!Object.hasOwn(actions, command.action) ||
+        !UUID.test(command.pipelineId || '') || !UUID.test(command.jobId || '') ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined ||
+        (command.action === 'nen_ci_artifact_preview'
+          ? !(typeof command.artifactPath === 'string' &&
+              /^nen-security-preview-qa\/(?:home|security|solar|software|communications|about|connect|saas-and-ai|renewable-energy)[-A-Za-z0-9]*\.png$/.test(command.artifactPath))
+          : command.artifactPath !== undefined)) {
+      throw new Error('NEN CircleCI read-only command not permitted');
+    }
+    return {command,project};
+  }
+  if (command.project === 'nen-website-cms' && provider !== 'semaphore') {
+    throw new Error('NEN website is Semaphore-only');
+  }
+  if (command.project === 'urban-design-paint' && provider !== 'semaphore') throw Error('Urban Paints is Semaphore-only');
+  if (provider === 'semaphore' && !(
+      (command.project === 'amaraii-os' &&
+        ['health','trigger','inspect','semaphore_artifacts','semaphore_png','semaphore_report','pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action)) ||
+      (command.project === 'churchpro' &&
+        ['health','trigger','inspect','churchpro_report','churchpro_artifact_probe','churchpro_png'].includes(command.action)) ||
+      (command.project === 'nen-website-cms' &&
+        ['health','inspect','nen_job_diagnostics','nen_artifact_list','nen_artifact_report','nen_artifact_preview','nen_trigger_preview','nen_trigger_cms_policy'].includes(command.action)) ||
+      (command.project === 'urban-design-paint' && ['health','trigger','inspect','urban_preview_bundle','urban_preview_list','urban_diagnostics'].includes(command.action)))) {
     throw new Error('Semaphore action not permitted');
+  }
+  if (command.project === 'nen-website-cms') {
+    // NEN CI can only trigger explicitly reviewed PR #40/42 SHA pairs, never arbitrary
+    // branches, pipeline files, releases, or application deployments.
+    if (command.action === 'nen_trigger_preview') {
+      if (!NEN_APPROVED_PREVIEWS.some((p) =>
+            command.branch === p.branch && command.commitSha === p.commitSha) ||
+          command.mode !== 'validation' || command.pipelineId !== undefined ||
+          command.jobId !== undefined || command.artifactPath !== undefined ||
+          command.startNumber !== undefined || command.jobNumber !== undefined) {
+        throw new Error('NEN preview revision not permitted');
+      }
+      return {command,project};
+    }
+    // Exact approved PR #44 CMS validation only, never arbitrary branch/deploy.
+    if (command.action === 'nen_trigger_cms_policy') {
+      if (command.branch !== NEN_CMS_POLICY_44.branch ||
+          command.commitSha !== NEN_CMS_POLICY_44.commitSha ||
+          command.mode !== 'validation' || command.pipelineId !== undefined ||
+          command.jobId !== undefined || command.artifactPath !== undefined ||
+          command.startNumber !== undefined || command.jobNumber !== undefined) {
+        throw new Error('NEN CMS policy revision not permitted');
+      }
+      return {command,project};
+    }
+    // Other NEN actions remain strictly read-only.
+    const noExtras = command.branch === undefined && command.mode === undefined &&
+      command.commitSha === undefined && command.startNumber === undefined &&
+      command.jobNumber === undefined;
+    if (!noExtras) throw new Error('NEN Semaphore command has unexpected fields');
+    if (command.action === 'health' && command.pipelineId === undefined &&
+        command.jobId === undefined && command.artifactPath === undefined) return {command,project};
+    if (typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId))
+      throw new Error('Invalid NEN pipeline identity');
+    if (command.action === 'inspect' && command.jobId === undefined &&
+        command.artifactPath === undefined) return {command,project};
+    if (command.action === 'nen_job_diagnostics' && typeof command.jobId === 'string' &&
+        UUID.test(command.jobId) && command.artifactPath === undefined) return {command,project};
+    if (['nen_artifact_list','nen_artifact_report'].includes(command.action) &&
+        command.jobId === undefined && command.artifactPath === undefined) return {command,project};
+    if (command.action === 'nen_artifact_preview' && command.jobId === undefined &&
+        typeof command.artifactPath === 'string' && NEN_SCREENSHOT.test(command.artifactPath))
+      return {command,project};
+    throw new Error('NEN Semaphore command rejected');
+  }
+  if (command.project === 'urban-design-paint' && command.action === 'urban_diagnostics') {
+    if (provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        command.branch !== URBAN_SEMAPHORE.branch ||
+        typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha) ||
+        command.mode !== undefined || command.artifactPath !== undefined ||
+        command.jobNumber !== undefined || command.startNumber !== undefined)
+      throw Error('Urban diagnostic request not permitted');
+    return {command,project};
+  }
+  if(command.project === 'urban-design-paint' && command.action === 'urban_preview_list') {
+    if(provider !== 'semaphore' || typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        command.branch !== URBAN_SEMAPHORE.branch || typeof command.commitSha !== 'string' ||
+        !COMMIT_SHA.test(command.commitSha) || command.artifactPath !== undefined ||
+        command.mode !== undefined || command.jobId !== undefined || command.jobNumber !== undefined ||
+        command.startNumber !== undefined) throw Error('Urban artifact listing not permitted');
+    return {command,project};
+  }
+  if(command.project === 'urban-design-paint' && command.action === 'urban_preview_bundle') {
+    if(provider !== 'semaphore' || typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        command.artifactPath !== 'preview-bundle/urban-paints-preview.tgz' ||
+        command.branch !== URBAN_SEMAPHORE.branch ||
+        typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha) ||
+        command.mode !== undefined || command.jobId !== undefined || command.jobNumber !== undefined ||
+        command.startNumber !== undefined) throw Error('Urban bundle request not permitted');
+    return {command,project};
   }
   if (command.action === 'health') {
     if (command.branch !== undefined || command.mode !== undefined ||
@@ -231,13 +346,19 @@ export function validateCommand(command, keyId, now = Date.now()) {
       if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha))
         throw new Error('Invalid automatic CI revision');
     }
-    const branches = provider === 'semaphore' ? SEMAPHORE_BRANCHES : project.branches;
+    const branches = provider === 'semaphore'
+      ? (command.project === 'churchpro' ? [CHURCHPRO_SEMAPHORE.branch] : command.project === 'urban-design-paint' ? [URBAN_SEMAPHORE.branch] : SEMAPHORE_BRANCHES)
+      : project.branches;
     if (typeof command.branch !== 'string' || !branches.includes(command.branch)) throw new Error('Branch not permitted');
     if (provider === 'semaphore') {
       if (command.mode !== 'validation') throw new Error('Pipeline mode not permitted');
       if (typeof command.commitSha !== 'string' || !COMMIT_SHA.test(command.commitSha)) {
         throw new Error('Invalid Semaphore revision');
       }
+      if (command.project === 'amaraii-os' && command.branch === 'feat/gym-historical-service-review-20261112' && command.commitSha !== '43690eef91cf5fa1e35bee7257312c2cb2586f48') throw Error('PR109 revision not permitted');
+      if (command.project === 'amaraii-os' && command.branch === 'feat/gym-historical-reconciliation-integration-20261113' && command.commitSha !== 'adc44c8f72cc4a5b861042cb0f98ea6ae48b44e8') throw Error('PR110 revision not permitted');
+      if (command.project === 'amaraii-os' && command.branch === 'codex/gym-editable-membership-dates-implementation-20261115' && command.commitSha !== 'efa5ecf3970a7e6788ea36b03a6895256c3b7bd5') throw Error('PR114 revision not permitted');
+      if (command.project === 'amaraii-os' && command.branch === 'codex/gym-history-date-fixes-20261116' && command.commitSha !== 'da9d7eb19251d9ff6fe739b87c8430feac718af9') throw Error('PR115 revision not permitted');
     } else if (typeof command.mode !== 'string' || !Object.hasOwn(project.modes, command.mode)) {
       throw new Error('Pipeline mode not permitted');
     }
@@ -311,6 +432,98 @@ export function validateCommand(command, keyId, now = Date.now()) {
         command.commitSha !== undefined || command.startNumber !== undefined) throw new Error('Job inspection has unexpected fields');
     return { command, project };
   }
+  // Exact-commit, read-only historical PT artifacts. No trigger or arbitrary URL.
+  if (['pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action)) {
+    if (provider !== 'semaphore' || command.project !== 'amaraii-os' ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.jobId !== undefined ||
+        command.jobNumber !== undefined || command.startNumber !== undefined ||
+        (command.action === 'pr109_discover'
+          ? command.pipelineId !== undefined || command.artifactPath !== undefined
+          : typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) ||
+        (command.action === 'pr109_artifacts'
+          ? command.artifactPath !== undefined &&
+              !['historical-service','historical-service/screenshots',
+                'historical-service/qa-intel','historical-service/qa-intel/screenshots',
+                'historical-service/qa-intel/artifacts'].includes(command.artifactPath)
+          : command.action === 'pr109_png' ? (
+              typeof command.artifactPath !== 'string' ||
+              command.artifactPath.length > 240 ||
+              !(/^historical-service\/screenshots\/historical-service-(?:320|390|1280|invalid-390)\.png$/.test(command.artifactPath) ||
+                /^historical-service\/qa-intel\/(?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_-]{1,110}\.png$/.test(command.artifactPath))
+            ) : command.action === 'pr109_report' ? ![
+                'historical-service/REPORT.md',
+                'historical-service/qa-intel/REPORT.md',
+                'historical-service/qa-intel/report.md',
+                'historical-service/qa-intel/report.json',
+                'historical-service/qa-intel/summary.json',
+                'historical-service/qa-intel/run.json',
+              ].includes(command.artifactPath) : false)) {
+      throw new Error('PR109 read-only artifact access not permitted');
+    }
+    return {command,project};
+  }
+  if(command.action==='semaphore_report'){
+    if(provider!=='semaphore'||command.project!=='amaraii-os'||!UUID.test(command.pipelineId||'')||
+       !['historical-service/REPORT.md','historical-service/qa-intel/run.json','gym-editable-dates/qa-intel-summary.json'].includes(command.artifactPath)||
+       ['branch','mode','commitSha','jobId','jobNumber','startNumber'].some(k=>command[k]!==undefined))throw Error('PR112 report not permitted');
+    return {command,project};
+  }
+  if (command.action === 'semaphore_png') {
+    if (provider!=='semaphore' || typeof command.pipelineId!=='string' || !UUID.test(command.pipelineId) ||
+      typeof command.artifactPath!=='string' ||
+      !( /^qa-intel\/screenshots\/(?:screenshots\/)?[A-Za-z0-9_-]{1,110}\.png$/.test(command.artifactPath) || /^historical-service\/screenshots\/(?:source-(?:evidence|review|holds)|legacy-history-(?:import|preview|actions-fallback)|integrated-archive-(?:preview|import|profile|expired)|manager-mapping|historical-service)-(?:320|390|1280)\.png$/.test(command.artifactPath) || /^gym-editable-dates\/screenshots\/(?:correction-preview|correction-confirmation|saved-amendment)-(?:1280|390|320)\.png$/.test(command.artifactPath) ) ||
+      command.branch!==undefined||command.mode!==undefined||command.commitSha!==undefined||
+      command.jobId!==undefined||command.jobNumber!==undefined||command.startNumber!==undefined)
+      throw new Error('Semaphore artifact preview not permitted');
+    return {command,project};
+  }
+  if (command.action === 'semaphore_artifacts') {
+    const dirs=['qa-intel','qa-intel/survey-report','qa-intel/survey-findings',
+      'qa-intel/survey-results-db','qa-intel/screenshots','qa-intel/visual','qa-intel/survey-screenshots',
+      'historical-service','historical-service/screenshots','historical-service/qa-intel','gym-editable-dates','gym-editable-dates/screenshots'];
+    if (provider!=='semaphore' || typeof command.pipelineId!=='string' || !UUID.test(command.pipelineId) ||
+        (command.jobId!==undefined && (typeof command.jobId!=='string'||!UUID.test(command.jobId))) ||
+        (command.artifactPath!==undefined && !dirs.includes(command.artifactPath)) ||
+        command.branch!==undefined||command.mode!==undefined||command.commitSha!==undefined||
+        command.jobNumber!==undefined||command.startNumber!==undefined) {
+      throw new Error('Semaphore artifact listing not permitted');
+    }
+    return {command,project};
+  }
+  if (command.action === 'churchpro_png') {
+    if (command.project !== 'churchpro' || provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        typeof command.artifactPath !== 'string' ||
+        !/^visual-review\/(?:people-390|navigation-390|cells-390|church-1280|people-1280|people-320|church-768|cells-1440|people-dark-1280|person-detail-390|cell-roster-390|staff-1280|staff-removed-1280|g4-requester-390|g4-review-1280|g4-review-confirm-1280|g4b-contact-hidden-390|g4b-contact-review-390|g4b-sensitive-review-1280|g4b-duplicate-hidden-1280|g4b-duplicate-decision-1280|g4b-unprivileged-denials-1280|g4b-person-tasks-320|g4c-owner-actions-390|g4c-basic-actions-hidden-390|g4d-editor-record-390|g4d-reader-record-320|g4d-branch-cell-390)\.png$/u.test(command.artifactPath) ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined) throw Error('ChurchPro PNG access not permitted');
+    return {command, project};
+  }
+  if (command.action === 'churchpro_artifact_probe') {
+    if (command.project !== 'churchpro' || provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        command.artifactPath !== undefined || command.branch !== undefined ||
+        command.mode !== undefined || command.commitSha !== undefined ||
+        command.startNumber !== undefined || command.jobNumber !== undefined) {
+      throw Error('ChurchPro artifact probe not permitted');
+    }
+    return {command, project};
+  }
+  if (command.action === 'churchpro_report') {
+    if (command.project !== 'churchpro' || provider !== 'semaphore' ||
+        typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
+        typeof command.jobId !== 'string' || !UUID.test(command.jobId) ||
+        !['qa-intel/churchpro/agent-handoff.json',
+          'qa-intel/churchpro/gather-browser-handoff.json'].includes(command.artifactPath) ||
+        command.branch !== undefined || command.mode !== undefined ||
+        command.commitSha !== undefined || command.startNumber !== undefined ||
+        command.jobNumber !== undefined) throw Error('ChurchPro report access not permitted');
+    return { command, project };
+  }
   if (command.action === 'inspect') {
     if (typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId)) throw new Error('Invalid pipelineId');
     if (command.branch !== undefined || command.mode !== undefined ||
@@ -370,6 +583,23 @@ async function resolveDefinitionId(env, project, requestFn) {
 }
 
 export async function executeCommand(env, command, project, requestFn = fetch) {
+  if (command.project === 'nen-website-cms' && command.provider === 'circleci') {
+    const actions = {
+      nen_ci_job_diagnostics: 'job_diagnostics',
+      nen_ci_project_probe: 'project_probe',
+      nen_ci_artifact_list: 'artifact_list',
+      nen_ci_artifact_report: 'artifact_report',
+      nen_ci_artifact_preview: 'artifact_png',
+    };
+    const task={
+      project:command.project,provider:'circleci',
+      action:actions[command.action],pipelineId:command.pipelineId,
+      jobId:command.jobId,...(command.artifactPath===undefined?{}:{artifactPath:command.artifactPath})
+    };
+    return command.action==='nen_ci_project_probe'
+      ? probeCircleCiNenProject(env,task,requestFn)
+      : readCircleCiNenEvidence(env,task,requestFn);
+  }
   if (command.provider === 'auto') {
     const selection=selectProvider(env,command);
     if (command.action === 'route') return {
@@ -388,7 +618,13 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
     return {...result,provider:'circleci',requestedRevision:command.commitSha,
       revisionVerificationRequired:true,selectionReason:selection.reason};
   }
-  if (command.provider === 'semaphore') return executeSemaphore(env, command, requestFn);
+  if (command.provider === 'semaphore') {
+    if (command.project === 'nen-website-cms') return executeSemaphoreNen(env,command,requestFn);
+    if (command.project === 'churchpro') return executeSemaphoreChurchPro(env,command,requestFn);
+    if (command.project === 'urban-design-paint') return executeSemaphoreUrban(env,command,requestFn);
+    if (['pr109_discover','pr109_artifacts','pr109_png','pr109_report'].includes(command.action)) return executePr109Evidence(env,command,requestFn);
+    return executeSemaphore(env,command,requestFn);
+  }
   if (command.action === 'health') {
     return {
       bridge: 'nen-ci-kv-bridge',
@@ -738,6 +974,18 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
        'Semaphore fallback not enabled', 'Trigger has unexpected fields',
        'Semaphore project not configured', 'Semaphore token not configured',
        'Semaphore project mismatch', 'Invalid Semaphore response',
+       'NEN Semaphore project not configured', 'NEN Semaphore pipeline ownership mismatch', 'Malformed Semaphore response',
+        'NEN CircleCI read-only command not permitted', 'NEN CircleCI project not configured',
+        'NEN CircleCI project identity mismatch', 'NEN CircleCI repository definition not verified uniquely',
+        'NEN CircleCI workflow identity mismatch', 'NEN CircleCI job ownership mismatch',
+        'NEN CircleCI pipeline ownership mismatch', 'NEN CircleCI revision not permitted',
+        'NEN CircleCI job identity mismatch', 'NEN artifact not present',
+        'NEN artifact host not permitted','NEN artifact exceeds byte limit',
+        'NEN artifact streaming required','NEN PNG signature mismatch',
+        'Invalid NEN artifact URL','Invalid CircleCI JSON','Invalid CircleCI artifacts response',
+       'NEN Semaphore project identity mismatch', 'NEN Semaphore pipeline identity mismatch',
+       'NEN Semaphore workflow identity missing', 'NEN Semaphore detailed pipeline identity mismatch',
+       'NEN Semaphore detailed job blocks missing', 'NEN preview revision not permitted', 'Invalid NEN preview workflow response',
       'Branch not permitted', 'Pipeline mode not permitted', 'Invalid pipelineId',
       'Action not permitted', 'Health command has unexpected fields',
       'Trigger does not accept pipelineId', 'Inspect has unexpected fields',
@@ -746,13 +994,28 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
       'Pipeline project mismatch', 'Recent command has unexpected fields', 'Probe command has unexpected fields', 'Audit command has unexpected fields', 'Invalid starting pipeline number',
       'Invalid release revision', 'Release command has unexpected fields', 'Invalid job number', 'Job inspection has unexpected fields', 'Job project mismatch',
       'Invalid job identity', 'Job steps have unexpected fields', 'Job does not belong to approved pipeline', 'Job identity mismatch',
-      'Artifact preview not permitted', 'Artifact not found', 'Artifact too large', 'Artifact format not supported', 'Artifact download failed', 'Unsafe artifact URL',
+      'Semaphore artifact listing not permitted', 'Semaphore artifact preview not permitted', 'Semaphore QA artifact access not permitted', 'Artifact preview not permitted', 'Artifact not found', 'Artifact too large', 'Artifact format not supported', 'Artifact download failed', 'Unsafe artifact URL',
+      'ChurchPro report access not permitted', 'ChurchPro pipeline identity mismatch',
+      'ChurchPro source identity missing', 'ChurchPro workflow identity mismatch',
+      'ChurchPro QA job ownership mismatch', 'QA artifact unavailable',
+      'Invalid artifact location', 'Invalid sanitized QA report', 'Report too large',
+      'Urban bundle request not permitted','Urban build provenance mismatch','Urban workflow identity missing',
+      'Urban artifact not found','Urban artifact redirect rejected','Unsafe Urban artifact URL',
+      'Urban artifact download failed','Urban artifact too large','Urban artifact format invalid',
+      'QA report source mismatch', 'Browser report source mismatch',
+      'ChurchPro artifact probe not permitted', 'ChurchPro artifact probe ownership mismatch',
+      'ChurchPro PNG access not permitted', 'ChurchPro PNG ownership mismatch',
+      'ChurchPro PNG job ownership mismatch', 'ChurchPro PNG artifact unavailable',
+      'ChurchPro PNG signature unavailable', 'ChurchPro PNG provenance mismatch',
+      'ChurchPro PNG download failed', 'ChurchPro PNG too large',
+      'ChurchPro PNG format mismatch', 'ChurchPro PNG dimensions invalid',
+      'ChurchPro PNG redirect limit',
     ];
     // Only expose typed failure categories: never emit raw upstream messages,
     // tokens, request payloads, stack traces or URLs.
     const error = safe.includes(message) || /^CircleCI API HTTP [0-9]{3}$/.test(message) ||
       /^Unsafe artifact URL: [a-z0-9.-]{1,253}$/.test(message) ||
-      /^Semaphore API HTTP [0-9]{3}$/.test(message) ? message
+      (/^Semaphore API HTTP [0-9]{3}$/.test(message) || /^NEN Semaphore API HTTP [0-9]{3}$/.test(message) || /^ChurchPro Semaphore API HTTP [0-9]{3}$/.test(message) || /^Urban Paints Semaphore API HTTP [0-9]{3}$/.test(message) || /^Urban artifact download HTTP [0-9]{3}$/.test(message)) ? message
       : err instanceof SyntaxError ? 'Invalid JSON response or command'
       : /^CircleCI v3 HTTP [0-9]{3}$/.test(message) ? message
       : err instanceof TypeError ? 'Network or API transport failure'

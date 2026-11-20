@@ -1,0 +1,119 @@
+# NEN International — read-only source validation for the shared Cloudflare CI bridge.
+# Run by the standard 'run-ci' GitHub PR label. No contexts, tokens, deployments,
+# Cloudflare uploads, CMS access, remote pipeline triggers or release permissions.
+# Separate status contexts make failures diagnosable without exporting CircleCI logs.
+version: 2.1
+
+jobs:
+  bridge-preflight:
+    docker:
+      - image: cimg/node:24.21.0
+    resource_class: small
+    environment:
+      CI: "true"
+      NODE_ENV: "test"
+    steps:
+      - checkout
+      - run:
+          name: Verify exact checkout, Node 24 and all source/test syntax
+          command: |
+            set -euo pipefail
+            test -n "${CIRCLE_SHA1:-}" || { echo "CIRCLECI_SHA_REQUIRED"; exit 1; }
+            test "$(git rev-parse HEAD)" = "$CIRCLE_SHA1" || { echo "CHECKOUT_SHA_MISMATCH"; exit 1; }
+            test "$(node -p 'process.versions.node.split(".")[0]')" = "24" || { echo "NODE24_REQUIRED"; exit 1; }
+            node --version
+            test -f bridge/LIVE-V149-SOURCE-CHECKPOINT.md
+            test -f bridge/tests/live-v150-source-parity.test.mjs
+            for file in bridge/src/*.mjs bridge/tests/*.test.mjs; do
+              node --check "$file"
+            done
+
+  bridge-test-group:
+    parameters:
+      group:
+        type: string
+      files:
+        type: string
+    docker:
+      - image: cimg/node:24.21.0
+    resource_class: small
+    environment:
+      CI: "true"
+      NODE_ENV: "test"
+    steps:
+      - checkout
+      - run:
+          name: Confirm current review commit
+          command: |
+            set -euo pipefail
+            test -n "${CIRCLE_SHA1:-}"
+            test "$(git rev-parse HEAD)" = "$CIRCLE_SHA1"
+      - run:
+          name: Run << parameters.group >> contract tests
+          command: |
+            set -euo pipefail
+            mkdir -p qa-artifacts/nen-ci-bridge
+            (cd bridge && node --test << parameters.files >>) 2>&1 | tee qa-artifacts/nen-ci-bridge/<< parameters.group >>.log
+      - store_artifacts:
+          path: qa-artifacts/nen-ci-bridge
+          destination: nen-ci-bridge-node24
+
+  bridge-node24-regression:
+    docker:
+      - image: cimg/node:24.21.0
+    resource_class: small
+    environment:
+      CI: "true"
+      NODE_ENV: "test"
+    steps:
+      - checkout
+      - run:
+          name: Confirm current review commit
+          command: |
+            set -euo pipefail
+            test -n "${CIRCLE_SHA1:-}"
+            test "$(git rev-parse HEAD)" = "$CIRCLE_SHA1"
+      - run:
+          name: Run complete Node 24 bridge regression suite
+          command: |
+            set -euo pipefail
+            mkdir -p qa-artifacts/nen-ci-bridge
+            (cd bridge && node --test tests/*.test.mjs) 2>&1 | tee qa-artifacts/nen-ci-bridge/node24-full-suite.log
+      - store_artifacts:
+          path: qa-artifacts/nen-ci-bridge
+          destination: nen-ci-bridge-node24
+
+workflows:
+  bridge-source-review:
+    jobs:
+      - bridge-preflight
+      - bridge-test-group:
+          name: bridge-security-parity
+          group: security-parity
+          files: "tests/live-v150-source-parity.test.mjs tests/live-v149-cross-project-gates.test.mjs tests/live-v149-no-http-commands.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-circleci-adapters
+          group: circleci-adapters
+          files: "tests/circleci-nen-evidence.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-semaphore-adapters
+          group: semaphore-adapters
+          files: "tests/semaphore.test.mjs tests/semaphore-nen.test.mjs tests/churchpro-semaphore.test.mjs tests/churchpro-v149-pin.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-other-adapters
+          group: other-adapters
+          files: "tests/amaraii-pr109-evidence.test.mjs tests/urban-paints.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-node24-regression:
+          requires:
+            - bridge-security-parity
+            - bridge-circleci-adapters
+            - bridge-semaphore-adapters
+            - bridge-other-adapters
