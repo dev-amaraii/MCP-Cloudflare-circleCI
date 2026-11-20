@@ -100,20 +100,48 @@ workflows:
           requires:
             - bridge-preflight
       - bridge-test-group:
-          name: bridge-semaphore-adapters
-          group: semaphore-adapters
-          files: "tests/semaphore.test.mjs tests/semaphore-nen.test.mjs tests/churchpro-semaphore.test.mjs tests/churchpro-v149-pin.test.mjs"
+          name: bridge-semaphore-core
+          group: semaphore-core
+          files: "tests/semaphore.test.mjs"
           requires:
             - bridge-preflight
       - bridge-test-group:
-          name: bridge-other-adapters
-          group: other-adapters
-          files: "tests/amaraii-pr109-evidence.test.mjs tests/urban-paints.test.mjs"
+          name: bridge-semaphore-nen
+          group: semaphore-nen
+          files: "tests/semaphore-nen.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-churchpro-semaphore
+          group: churchpro-semaphore
+          files: "tests/churchpro-semaphore.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-churchpro-pin
+          group: churchpro-pin
+          files: "tests/churchpro-v149-pin.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-amaraii-adapter
+          group: amaraii-adapter
+          files: "tests/amaraii-pr109-evidence.test.mjs"
+          requires:
+            - bridge-preflight
+      - bridge-test-group:
+          name: bridge-urban-adapter
+          group: urban-adapter
+          files: "tests/urban-paints.test.mjs"
           requires:
             - bridge-preflight
       - bridge-node24-regression:
           requires:
             - bridge-security-parity
             - bridge-circleci-adapters
-            - bridge-semaphore-adapters
-            - bridge-other-adapters
+            - bridge-semaphore-core
+            - bridge-semaphore-nen
+            - bridge-churchpro-semaphore
+            - bridge-churchpro-pin
+            - bridge-amaraii-adapter
+            - bridge-urban-adapter
