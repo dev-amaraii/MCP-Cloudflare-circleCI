@@ -227,9 +227,9 @@ test("PR110 integration validation cannot trigger for another revision or projec
    branch,commitSha,mode:"validation",approved:true,requestedAt:new Date(now).toISOString()};
  assert.doesNotThrow(()=>validateCommand(command,id,now));
  assert.throws(()=>validateCommand({...command,commitSha:"a".repeat(40)},id,now),
-   /PR110 validation revision not permitted/);
+   /PR110 revision not permitted/);
  assert.throws(()=>validateCommand({...command,commitSha:"48bbd49b702bdd560dd97b6ce5a83bdf009af0d0"},id,now),
-   /PR110 validation revision not permitted/);
+   /PR110 revision not permitted/);
  const calls=[];
  const mock=async(url,options)=>{calls.push({url,options});
    return response({workflow_id:"33333333-3333-4333-8333-333333333333",
@@ -241,7 +241,7 @@ test("PR110 integration validation cannot trigger for another revision or projec
  assert.deepEqual(body,{project_id:projectId,reference:"refs/heads/"+branch,
    commit_sha:commitSha,pipeline_file:".semaphore/semaphore.yml"});
  await assert.rejects(executeSemaphore(env,{...command,commitSha:"b".repeat(40)},mock),
-   /PR110 validation revision not permitted/);
+   /PR110 revision not permitted/);
  assert.equal(calls.length,1);
 });
 
@@ -254,7 +254,7 @@ test("PR109 Semaphore run is exactly pinned and never accepts another branch rev
    approved:true,requestedAt:new Date(now).toISOString()};
  assert.doesNotThrow(()=>validateCommand(envelope,id,now));
  assert.throws(()=>validateCommand({...envelope,commitSha:"a".repeat(40)},id,now),
-   /PR109 validation revision not permitted/);
+   /PR109 revision not permitted/);
  assert.throws(()=>validateCommand({...envelope,artifactPath:"secret.env"},id,now));
  const calls=[];
  const mock=async(url,options)=>{
@@ -273,6 +273,6 @@ test("PR109 Semaphore run is exactly pinned and never accepts another branch rev
    pipeline_file:".semaphore/semaphore.yml",
  });
  await assert.rejects(executeSemaphore(env,{...envelope,commitSha:"b".repeat(40)},mock),
-   /PR109 validation revision not permitted/);
+   /PR109 revision not permitted/);
  assert.equal(calls.length,1);
 });
