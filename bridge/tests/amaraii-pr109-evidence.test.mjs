@@ -200,60 +200,35 @@ test("Queue validator accepts only reviewed, bounded PR109 command shapes",()=>{
  ])assert.throws(()=>validateCommand({...baseEnvelope,...bad},id,now));
 });
 
-test("read-only PR110 failed-job diagnostics require exact job and never return raw logs",async()=>{
- const jobId="7418b830-a9fb-4701-9a11-1a262fdfbd40";
- const pipeline="0681f323-34b8-413f-9672-742123060e6b";
- const sha="48bbd49b702bdd560dd97b6ce5a83bdf009af0d0";
- const branch="feat/gym-historical-reconciliation-integration-20261113";
+// The shared Worker intentionally no longer admits the PR110 diagnostics
+// action. Test the actual queue validation boundary, not a retired reader.
+test("retired PR110 diagnostics action fails closed before provider access",()=>{
  const now=Date.now(),id="66666666-6666-4666-8666-666666666666";
  const envelope={v:1,id,action:"pr110_diagnostics",project:"amaraii-os",
-  provider:"semaphore",pipelineId:pipeline,jobId,approved:true,
-  requestedAt:new Date(now).toISOString()};
- assert.doesNotThrow(()=>validateCommand(envelope,id,now));
- for(const wrong of [
-  {pipelineId:"99999999-9999-4999-8999-999999999999"},
-  {jobId:"88888888-8888-4888-8888-888888888888"},
-  {provider:"circleci"},{project:"churchpro"},{artifactPath:"secret.env"},
-  {branch},{commitSha:sha},
- ])assert.throws(()=>validateCommand({...envelope,...wrong},id,now));
- const events=[
-  {event:"cmd_finished",directive:"pnpm typecheck",exit_code:0},
-  {event:"cmd_output",output:"SENSITIVE_TOKEN=something from fixture - do not echo"},
-  {event:"cmd_finished",directive:"pnpm --filter @amaraii/api test",exit_code:0},
-  {event:"cmd_finished",directive:"printf '%s' reports",exit_code:1},
- ];
- const calls=[];
- const fn=async(url)=>{calls.push(url);
-  if(url===origin+"/pipelines/"+pipeline)return response({pipeline:{
-   project_id:projectId,ppl_id:pipeline,branch_name:branch,commit_sha:sha}});
-  if(url===origin+"/pipelines/"+pipeline+"?detailed=true")return response({
-   pipeline:{project_id:projectId},blocks:[{jobs:[{job_id:jobId,result:"failed"}]}]});
-  if(url===origin+"/logs/"+jobId)return response({events});
-  throw Error("unexpected remote request");
- };
- const result=await executeSemaphore(env,envelope,fn);
- assert.equal(result.eventCount,events.length);
- assert.deepEqual(result.commands.map(c=>c.category),["typecheck","api tests","reporting epilogue"]);
- assert.deepEqual(result.commands.map(c=>c.exitCode),[0,0,1]);
- assert.equal(result.rawLogsReturned,false);
- assert(!JSON.stringify(result).includes("SENSITIVE_TOKEN"));
- assert.equal(calls.length,3);
- const ownershipRequests=[];
- const denied=async url=>{ownershipRequests.push(url);return response({pipeline:{
-  project_id:"ffffffff-ffff-4fff-8fff-ffffffffffff",ppl_id:pipeline,
-  branch_name:branch,commit_sha:sha}});};
- await assert.rejects(executeSemaphore(env,envelope,denied),/ownership mismatch/);
- assert.equal(ownershipRequests.length,1);
+   provider:"semaphore",pipelineId:"0681f323-34b8-413f-9672-742123060e6b",
+   jobId:"7418b830-a9fb-4701-9a11-1a262fdfbd40",approved:true,
+   requestedAt:new Date(now).toISOString()};
+ assert.throws(()=>validateCommand(envelope,id,now),/Semaphore action not permitted/);
+ // Alternative resource IDs, providers, and extra fields cannot restore a
+ // removed read-only action. No API/mock network call is made.
+ for(const patch of [
+   {jobId:"88888888-8888-4888-8888-888888888888"},
+   {pipelineId:"99999999-9999-4999-8999-999999999999"},
+   {artifactPath:"secret.env"}, {provider:"circleci"},
+   {project:"churchpro"},
+ ]) assert.throws(()=>validateCommand({...envelope,...patch},id,now));
 });
 
 test("PR110 integration validation cannot trigger for another revision or project",async()=>{
  const id="66666666-6666-4666-8666-666666666666",now=Date.now();
  const branch="feat/gym-historical-reconciliation-integration-20261113";
- const commitSha="48bbd49b702bdd560dd97b6ce5a83bdf009af0d0";
+ const commitSha="adc44c8f72cc4a5b861042cb0f98ea6ae48b44e8";
  const command={v:1,id,action:"trigger",project:"amaraii-os",provider:"semaphore",
    branch,commitSha,mode:"validation",approved:true,requestedAt:new Date(now).toISOString()};
  assert.doesNotThrow(()=>validateCommand(command,id,now));
  assert.throws(()=>validateCommand({...command,commitSha:"a".repeat(40)},id,now),
+   /PR110 validation revision not permitted/);
+ assert.throws(()=>validateCommand({...command,commitSha:"48bbd49b702bdd560dd97b6ce5a83bdf009af0d0"},id,now),
    /PR110 validation revision not permitted/);
  const calls=[];
  const mock=async(url,options)=>{calls.push({url,options});
