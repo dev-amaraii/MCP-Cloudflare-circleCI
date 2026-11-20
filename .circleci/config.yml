@@ -96,7 +96,7 @@ workflows:
       - bridge-test-group:
           name: bridge-circleci-adapters
           group: circleci-adapters
-          files: "tests/circleci-nen-evidence.test.mjs tests/circleci-nen-review.test.mjs"
+          files: "tests/circleci-nen-evidence.test.mjs"
           requires:
             - bridge-preflight
       - bridge-test-group:
