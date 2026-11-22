@@ -205,6 +205,27 @@ function hasOnlyKeys(value, keys) {
 
 // Exact-job, allowlisted Bookings Vitest diagnosis for one disposable AmaraiiOS CI run.
 // Never return raw CircleCI output, environment values, command lines, or URLs.
+/** Exact PR124 synthetic job321/unit step106: names/locations only, no logs. */
+function summarizePr124Units(raw){
+ const lines=String(raw).slice(-180000).replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').split(/\r?\n/);
+ const failedFiles=[],failedTests=[],locations=[],errorKinds=[],packages=[];
+ for(const rawLine of lines){
+  const line=rawLine.trim();
+  const file=line.match(/(?:^|\s)(?:FAIL|❯)\s+((?:packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?)/);
+  if(file&&failedFiles.length<12&&!failedFiles.includes(file[1]))failedFiles.push(file[1].slice(0,140));
+  const test=line.match(/\b(?:FAIL|×|❯)\s+([\w -]{2,85})\s*>\s*([\w /()'.,:-]{2,120})/);
+  if(test&&failedTests.length<12)failedTests.push((test[1]+' > '+test[2]).slice(0,160));
+  const loc=line.match(/\b((?:packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?):(\d{1,5}):(\d{1,4})/);
+  if(loc&&locations.length<16)locations.push({file:loc[1].slice(0,130),line:Number(loc[2]),column:Number(loc[3])});
+  for(const word of ['AssertionError','TypeError','ReferenceError','ZodError','DatabaseError','TimeoutError','SyntaxError','AggregateError']){
+   if(line.includes(word)&&!errorKinds.includes(word))errorKinds.push(word);
+  }
+  const pack=line.match(/(?:^|\s)(?:@amaraii\/)([\w-]+):test:/);
+  if(pack&&!packages.includes(pack[1]))packages.push(pack[1]);
+ }
+ return {failedFiles,failedTests,locations,errorKinds,packages:packages.slice(0,15),testFailuresDetected:lines.some(l=>/Test Files\s+\d+ failed|Tests\s+\d+ failed/.test(l)),hasTimeout:lines.some(l=>/Test timed out|TimeoutError/.test(l))};
+}
+
 /** Exact CircleCI job 320 only: diagnostic classes/paths, never arbitrary output. */
 function summarizePr124Typecheck(raw){
  const lines=String(raw).slice(-180000).replace(/\x1b\[[0-9;]*[A-Za-z]/g,"").split(/\r?\n/);
@@ -850,6 +871,10 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         const raw=full.slice(0,50000);
         // One pinned synthetic job only; all other projects/jobs retain their
         // existing diagnostic schema and cannot retrieve Vitest assertions.
+        const pinnedPr124Unit=command.project==='amaraii-os' &&
+          command.pipelineId==='b6643e65-ca11-42de-bc41-fcbd1a12238c' &&
+          command.jobId==='e107e64b-2f26-4f0f-8f51-38237f846dfb' &&
+          command.jobNumber===321 && failed.step.num===106;
         const pinnedPr124=command.project==='amaraii-os' &&
           command.pipelineId==='8e6bdb00-8cba-4fcb-88be-67937f3c9351' &&
           command.jobId==='785ad4ae-0b7a-4810-b134-a350ef22a36c' &&
@@ -873,6 +898,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           outputAvailable:raw.length>0,
           ...(pinnedPr118?{pinnedVitest:summarizePr118WorkspaceVitest(full)}:{}),
           ...(pinnedPr124?{pinnedTypecheck:summarizePr124Typecheck(full)}:{}),
+          ...(pinnedPr124Unit?{pinnedUnits:summarizePr124Units(full)}:{}),
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
     }
