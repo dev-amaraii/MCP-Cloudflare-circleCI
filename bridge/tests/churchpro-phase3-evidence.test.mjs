@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  readCircleCiChurchProPhase3, CHURCHPRO_PHASE3_PIN,CHURCHPRO_PHASE3_PATHS,
+  readCircleCiChurchProPhase3,checkedPhase3Artifact,
+  CHURCHPRO_PHASE3_PIN,CHURCHPRO_PHASE3_PATHS,CHURCHPRO_PHASE3_LATEST,
 } from '../src/circleci-churchpro-phase3.mjs';
 
 const PIN=CHURCHPRO_PHASE3_PIN;
@@ -128,4 +129,90 @@ test('never follows artifact redirects to an arbitrary host',async()=>{
   await assert.rejects(readCircleCiChurchProPhase3(env,cmd(),f.request),
     /artifact URL denied/);
   assert.equal(f.calls.some(x=>x.url==='https://evil.example/artifact.json'),false);
+});
+
+const NEW=CHURCHPRO_PHASE3_LATEST;
+const machine={
+  schemaVersion:1,project:'ChurchPro',sourceRevision:NEW.sourceRevision,
+  evidenceKind:'isolated_disposable_fault_machine_observation_not_a_reviewer_verdict',
+  database:'fresh_testcontainers_postgresql',
+  originalTestSource:'apps/api/test/attendance-api.e2e-spec.ts',
+  jestReportSha256:'a'.repeat(64),
+  machineFaultParts:3,passedTests:3,
+  independentSupervisorVerified:false,independentReviewerVerified:false,
+  independentApiAcceptance:'NOT_YET_GRANTED',releaseAuthorized:false,
+  faultCases:[
+    {id:'UAT-12',status:'DISPOSABLE_MACHINE_EVIDENCE_AVAILABLE_SUPERVISION_PENDING',
+      parts:[{part:'service',observedHttp:[500,201],assertedChecks:['rollbackNoRow','auditUnchanged','privilegeRestored','recoveredRowAndAudit'],result:'machine_assertions_passed'},
+        {part:'session',observedHttp:[500,201,200],assertedChecks:['rollbackNoRow','auditUnchanged','privilegeRestored','recoveredRowAndAudit','idempotentRetry'],result:'machine_assertions_passed'}]},
+    {id:'A12',status:'DISPOSABLE_MACHINE_EVIDENCE_AVAILABLE_SUPERVISION_PENDING',
+      parts:[{part:'attendance',observedHttp:[500,500,201,200],assertedChecks:['markRollback','countRollback','requestTokenRollback','auditUnchanged','privilegeRestored','recoveredMarkAndCount','recoveredAudit','durableTokenReceipt'],result:'machine_assertions_passed'}]},
+  ],
+};
+function latestMock(jobId,path,value){
+  const calls=[];
+  const jobName=jobId===NEW.apiJobId?'api':'gather_browser';
+  const fetchMock=async (url,init={})=>{
+    calls.push({url,headers:init.headers});
+    if(url==='https://circleci.com/api/v2/workflow/'+NEW.workflowId)
+      return Response.json({id:NEW.workflowId,pipeline_id:NEW.pipelineId});
+    if(url==='https://circleci.com/api/v2/pipeline/'+NEW.pipelineId)
+      return Response.json({id:NEW.pipelineId,
+        project_slug:'circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu',
+        vcs:{revision:NEW.sourceRevision}});
+    if(url==='https://circleci.com/api/v2/workflow/'+NEW.workflowId+'/job')
+      return Response.json({items:[{id:jobId,name:jobName,
+        project_slug:'circleci/B65DMdC1ZhAJQM74t7SrZ1/HQvs3kNUw3sJb4jVVJizHu',status:'success'}]});
+    if(url==='https://circleci.com/api/v3/jobs/'+jobId+'/artifacts')
+      return Response.json({data:[{attributes:{path,url:'https://test-gh.circle-artifacts.com/new.json'}}]});
+    if(url==='https://test-gh.circle-artifacts.com/new.json')
+      return new Response(JSON.stringify(value),{status:200});
+    throw Error('unexpected: '+url);
+  };
+  return {request:fetchMock,calls};
+}
+const latestCmd=(jobId,path)=>({
+  project:'churchpro',provider:'circleci',action:'churchpro_phase3_latest_artifact',
+  pipelineId:NEW.workflowId,jobId,artifactPath:path,
+});
+test('latest exact source accepts the disposable fault machine report without granting supervised approval',async()=>{
+  const cmd=latestCmd(NEW.apiJobId,NEW.faultArtifact);
+  const m=latestMock(NEW.apiJobId,NEW.faultArtifact,machine);
+  const result=await readCircleCiChurchProPhase3(env,cmd,m.request);
+  assert.equal(result.sourceRevision,NEW.sourceRevision);
+  assert.equal(result.content.machineFaultParts,3);
+  assert.equal(result.content.independentSupervisorVerified,false);
+  assert.equal(result.independentAcceptance,'NOT_YET_GRANTED');
+  assert.equal(result.releasePermitted,false);
+  assert.match(result.artifactSha256,/^[a-f0-9]{64}$/);
+});
+test('latest exact source also supports only three normal-case files on gather job',async()=>{
+  for(const [path,value] of [[CHURCHPRO_PHASE3_PATHS[0],report()],
+    [CHURCHPRO_PHASE3_PATHS[1],intake()],
+    [CHURCHPRO_PHASE3_PATHS[2],handoff()]]){
+    value[path===CHURCHPRO_PHASE3_PATHS[2]?'sourceRevision':'revision']=NEW.sourceRevision;
+    const cmd=latestCmd(NEW.gatherJobId,path);
+    checkedPhase3Artifact(cmd);
+    const result=await readCircleCiChurchProPhase3(env,cmd,
+      latestMock(NEW.gatherJobId,path,value).request);
+    assert.equal(result.sourceRevision,NEW.sourceRevision);
+  }
+});
+test('latest source refuses crossing API and browser jobs, unapproved files and extra evidence fields',async()=>{
+  for(const invalid of [
+    latestCmd(NEW.apiJobId,CHURCHPRO_PHASE3_PATHS[0]),
+    latestCmd(NEW.gatherJobId,NEW.faultArtifact),
+    latestCmd(NEW.gatherJobId,'some-other-file.json'),
+    {...latestCmd(NEW.apiJobId,NEW.faultArtifact),jobId:PIN.jobId},
+  ])assert.throws(()=>checkedPhase3Artifact(invalid),/artifact action denied/);
+  const raw={...machine,sensitiveContacts:'private'};
+  await assert.rejects(readCircleCiChurchProPhase3(env,
+    latestCmd(NEW.apiJobId,NEW.faultArtifact),
+    latestMock(NEW.apiJobId,NEW.faultArtifact,raw).request),
+    /controlled fault report invalid/);
+  const forged={...machine,independentSupervisorVerified:true};
+  await assert.rejects(readCircleCiChurchProPhase3(env,
+    latestCmd(NEW.apiJobId,NEW.faultArtifact),
+    latestMock(NEW.apiJobId,NEW.faultArtifact,forged).request),
+    /controlled fault report invalid/);
 });
