@@ -639,7 +639,11 @@ async function resolveDefinitionId(env, project, requestFn) {
 export async function executeCommand(env, command, project, requestFn = fetch) {
   if (command.project==='churchpro' && command.provider==='circleci' &&
       command.action==='churchpro_phase3_artifact') {
-    return readCircleCiChurchProPhase3(env,command,requestFn);
+    return readCircleCiChurchProPhase3(env, {
+      project:command.project,provider:command.provider,action:command.action,
+      pipelineId:command.pipelineId,jobId:command.jobId,
+      artifactPath:command.artifactPath,
+    },requestFn);
   }
   if (command.project === 'nen-website-cms' && command.provider === 'circleci') {
     const actions = {
