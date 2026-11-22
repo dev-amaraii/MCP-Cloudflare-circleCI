@@ -31,7 +31,7 @@ test('seven unchanged historical bridge modules retain their v185 verified sourc
 
 test('updated bridge entrypoint preserves live Gym/Bookings code and exact Phase 3 read gate', async () => {
   const source=await readFile(new URL('../src/index.mjs',import.meta.url),'utf8');
-  assert.ok(source.includes('PINNED_GYM_QA_JOB'));
+  assert.ok(source.includes('summarizePr124Typecheck'));
   assert.ok(source.includes('summarizePr118WorkspaceVitest'));
   assert.ok(source.includes("command.action==='churchpro_phase3_artifact'"));
   assert.ok(source.includes('CHURCHPRO_PHASE3_PATHS.includes(command.artifactPath)'));
