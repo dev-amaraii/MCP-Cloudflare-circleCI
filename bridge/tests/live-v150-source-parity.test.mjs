@@ -33,7 +33,7 @@ test('updated bridge entrypoint preserves live Gym/Bookings code and exact Phase
   const source=await readFile(new URL('../src/index.mjs',import.meta.url),'utf8');
   assert.ok(source.includes('summarizePr124Typecheck'));
   assert.ok(source.includes('summarizePr118WorkspaceVitest'));
-  assert.ok(source.includes("command.action==='churchpro_phase3_artifact'"));
+  assert.ok(source.includes("'churchpro_phase3_artifact','churchpro_phase3_latest_artifact'"));
   assert.ok(source.includes('checkedPhase3Artifact({'));
   assert.ok(source.includes('readCircleCiChurchProPhase3(env, {'));
   assert.ok(source.includes("fetch() {\n    return new Response('Not found'"));
