@@ -18,6 +18,15 @@ export const CHURCHPRO_PHASE3_PATHS=Object.freeze([
   'qa-intel/churchpro/phase3-independent-review-intake.json',
   'qa-intel/churchpro/phase3-reviewer-handoff.json',
 ]);
+export const CHURCHPRO_PHASE3_LATEST=Object.freeze({
+  workflowId:'51cfe3a8-b271-4608-a64c-0bcaeaed3ef4',
+  pipelineId:'4e1440de-5cc8-4384-8144-ed9e6227451c',
+  sourceRevision:'63cc5aaf7bf18a5380f779b04abaa2a9579a51ce',
+  gatherJobId:'af7106a1-ab5a-4539-a1f8-8abd2fd54376',
+  apiJobId:'9eecfc19-b11d-44c9-ba2a-29c00705be3f',
+  faultArtifact:'qa-intel/churchpro/phase3-controlled-fault-machine-evidence.json',
+});
+
 const MAX_BYTES=350000;
 const CASES=Object.freeze([
   ...Array.from({length:12},(_,i)=>'UAT-'+String(i+1).padStart(2,'0')),
@@ -38,14 +47,32 @@ async function json(env,url,requestFn){
   check(isObject(body),'ChurchPro Phase3 invalid provider JSON');
   return body;
 }
-function checkedPath(command){
+export function checkedPhase3Artifact(command){
   check(isObject(command)&&command.project==='churchpro'&&command.provider==='circleci'&&
-    command.action==='churchpro_phase3_artifact' &&
-    command.pipelineId===CHURCHPRO_PHASE3_PIN.workflowId &&
-    command.jobId===CHURCHPRO_PHASE3_PIN.jobId &&
-    CHURCHPRO_PHASE3_PATHS.includes(command.artifactPath) &&
     Object.keys(command).every(k=>['project','provider','action','pipelineId','jobId','artifactPath'].includes(k)),
     'ChurchPro Phase3 artifact action denied');
+  let pin;
+  if(command.action==='churchpro_phase3_artifact'&&
+      command.pipelineId===CHURCHPRO_PHASE3_PIN.workflowId&&
+      command.jobId===CHURCHPRO_PHASE3_PIN.jobId&&
+      CHURCHPRO_PHASE3_PATHS.includes(command.artifactPath)){
+    pin=CHURCHPRO_PHASE3_PIN;
+  }else if(command.action==='churchpro_phase3_latest_artifact'&&
+      command.pipelineId===CHURCHPRO_PHASE3_LATEST.workflowId&&
+      (command.jobId===CHURCHPRO_PHASE3_LATEST.gatherJobId&&
+       CHURCHPRO_PHASE3_PATHS.includes(command.artifactPath)||
+       command.jobId===CHURCHPRO_PHASE3_LATEST.apiJobId&&
+       command.artifactPath===CHURCHPRO_PHASE3_LATEST.faultArtifact)){
+    pin={
+      workflowId:CHURCHPRO_PHASE3_LATEST.workflowId,
+      pipelineId:CHURCHPRO_PHASE3_LATEST.pipelineId,
+      sourceRevision:CHURCHPRO_PHASE3_LATEST.sourceRevision,
+      jobId:command.jobId,
+      jobName:command.jobId===CHURCHPRO_PHASE3_LATEST.apiJobId?'api':'gather_browser',
+    };
+  }
+  check(!!pin,'ChurchPro Phase3 artifact action denied');
+  return pin;
 }
 function trusted(value){
   check(typeof value==='string','ChurchPro Phase3 artifact URL denied');
@@ -95,9 +122,31 @@ function validProof(proof){
   }
   return true;
 }
-function validReport(path,value){
-  const pin=CHURCHPRO_PHASE3_PIN;
+function validReport(path,value,pin){
   check(isObject(value)&&value.schemaVersion===1,'ChurchPro Phase3 invalid case schema');
+  if(path===CHURCHPRO_PHASE3_LATEST.faultArtifact){
+    check(value.sourceRevision===pin.sourceRevision&&
+      value.project==='ChurchPro'&&
+      value.evidenceKind==='isolated_disposable_fault_machine_observation_not_a_reviewer_verdict'&&
+      value.database==='fresh_testcontainers_postgresql'&&
+      value.machineFaultParts===3&&value.passedTests===3&&
+      value.independentSupervisorVerified===false&&
+      value.independentReviewerVerified===false&&
+      value.independentApiAcceptance==='NOT_YET_GRANTED'&&
+      value.releaseAuthorized===false&&
+      HEX64.test(value.jestReportSha256||'')&&
+      Array.isArray(value.faultCases)&&value.faultCases.length===2&&
+      value.faultCases[0].id==='UAT-12'&&value.faultCases[1].id==='A12'&&
+      value.faultCases.every(x=>x.status==='DISPOSABLE_MACHINE_EVIDENCE_AVAILABLE_SUPERVISION_PENDING')&&
+      value.faultCases[0].parts?.length===2&&value.faultCases[1].parts?.length===1&&
+      JSON.stringify(value.faultCases.map(x=>x.parts.map(p=>p.observedHttp)))===
+        JSON.stringify([[[500,201],[500,201,200]],[[500,500,201,200]]])&&
+      value.faultCases.every(x=>x.parts.every(p=>p.result==='machine_assertions_passed'&&
+        Array.isArray(p.assertedChecks)&&p.assertedChecks.length>=4&&
+        p.assertedChecks.every(k=>typeof k==='string'&&/^[A-Za-z]{4,40}$/.test(k)))),
+      'ChurchPro Phase3 controlled fault report invalid');
+    return value;
+  }
   const rev=path===CHURCHPRO_PHASE3_PATHS[2]?value.sourceRevision:value.revision;
   check(rev===pin.sourceRevision,'ChurchPro Phase3 revision mismatch');
   check(Array.isArray(value.cases)&&value.cases.length===CASES.length&&
@@ -133,8 +182,7 @@ function validReport(path,value){
   return value;
 }
 export async function readCircleCiChurchProPhase3(env,command,requestFn=fetch){
-  checkedPath(command);
-  const pin=CHURCHPRO_PHASE3_PIN;
+  const pin=checkedPhase3Artifact(command);
   const workflow=await json(env,API2+'/workflow/'+pin.workflowId,requestFn);
   check(workflow.id===pin.workflowId&&workflow.pipeline_id===pin.pipelineId,
     'ChurchPro Phase3 workflow identity mismatch');
