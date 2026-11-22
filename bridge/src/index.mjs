@@ -226,6 +226,29 @@ function summarizePr124Typecheck(raw){
  return {errors,codes,typecheckPackages:kinds,outputLengthClass:raw.length>50000?'over50k':'under50k',tailLength:lines.length};
 }
 
+/** Exact synthetic job321 step106, bounded unit failure metadata only. */
+function summarizePr124UnitFailures(raw){
+ const lines=String(raw).slice(-180000).replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').split(/\r?\n/);
+ const failedFiles=[],failedTests=[],locations=[],kinds=[],packages=[];
+ for(const line0 of lines){
+  const line=line0.trim();
+  const file=line.match(/\b((?:src|packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?)/);
+  if(file&&(/\bfail(?:ed)?\b|[×❯]|\bFAIL\b/i.test(line))&&failedFiles.length<12&&!failedFiles.includes(file[1]))failedFiles.push(file[1].slice(0,140));
+  const test=line.match(/\b(?:FAIL|×|❯)\s+([\w -]{2,85})\s*>\s*([\w /()'.,:-]{2,120})/);
+  if(test&&failedTests.length<12)failedTests.push((test[1]+' > '+test[2]).slice(0,160));
+  const loc=line.match(/\b((?:src|packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?):(\d{1,5}):(\d{1,4})/);
+  if(loc&&locations.length<16)locations.push({file:loc[1].slice(0,130),line:Number(loc[2]),column:Number(loc[3])});
+  for(const kind of ['AssertionError','TypeError','ReferenceError','ZodError','DatabaseError','TimeoutError','SyntaxError','AggregateError']){
+    if(line.includes(kind)&&!kinds.includes(kind))kinds.push(kind);
+  }
+  const pkg=line.match(/(?:^|\s)@amaraii\/([\w-]+):test:/);
+  if(pkg&&!packages.includes(pkg[1]))packages.push(pkg[1]);
+ }
+ return {failedFiles,failedTests,locations,kinds,packages:packages.slice(0,15),
+   testsFailed:lines.some(l=>/Test Files\s+\d+ failed|Tests\s+\d+ failed/.test(l)),
+   timeout:lines.some(l=>/Test timed out|TimeoutError/.test(l))};
+}
+
 export function summarizePr118WorkspaceVitest(raw) {
   const lines = String(raw).slice(-120000).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split(/\r?\n/);
   const titles=[], locations=[], categories=[], comparisons=[];
@@ -878,6 +901,10 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           command.pipelineId==='8e6bdb00-8cba-4fcb-88be-67937f3c9351' &&
           command.jobId==='785ad4ae-0b7a-4810-b134-a350ef22a36c' &&
           command.jobNumber===320 && failed.step.num===105;
+        const pinnedPr124Unit=command.project==='amaraii-os' &&
+          command.pipelineId==='b6643e65-ca11-42de-bc41-fcbd1a12238c' &&
+          command.jobId==='e107e64b-2f26-4f0f-8f51-38237f846dfb' &&
+          command.jobNumber===321 && failed.step.num===106;
         const pinnedPr118=command.project==='amaraii-os' &&
           command.pipelineId==='1ae4b8bb-100f-41aa-845c-9c5b7a128c0a' &&
           command.jobId==='9a3479e5-bead-4022-a454-fb5b9c638c76' &&
@@ -897,6 +924,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           outputAvailable:raw.length>0,
           ...(pinnedPr118?{pinnedVitest:summarizePr118WorkspaceVitest(full)}:{}),
           ...(pinnedPr124?{pinnedTypecheck:summarizePr124Typecheck(full)}:{}),
+          ...(pinnedPr124Unit?{pinnedUnits:summarizePr124UnitFailures(full)}:{}),
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
     }
