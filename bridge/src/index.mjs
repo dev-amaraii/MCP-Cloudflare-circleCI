@@ -40,7 +40,7 @@ const PINNED_GYM_QA_JOB=Object.freeze({
   pipelineId:'e1bdd280-7359-47ed-8311-9347b6c42735',
   jobId:'647927c4-0671-4442-8263-d67635ad1f24',jobNumber:318,
 });
-const GYM_QA_SCREENSHOTS=/^qa-intel\\/gym\\/historical-service\\/(?:source-evidence|source-review|source-holds)-(?:320|390|1280)\\.png$/;
+const GYM_QA_SCREENSHOTS=new RegExp("^qa-intel/gym/historical-service/(?:source-evidence|source-review|source-holds)-(?:320|390|1280)\\.png$");
 
 // Bar/POS screenshots use disposable CircleCI fixtures. Only the exact,
 // already-produced cashier and table-bill captures are readable; no JSON,
