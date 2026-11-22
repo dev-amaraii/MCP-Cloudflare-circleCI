@@ -34,6 +34,14 @@ const QA_IMAGE_PATHS = Object.freeze({
   churchpro: /^qa-intel\/churchpro\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
 });
 
+// Only already-produced synthetic Gym source-review screenshots at the exact
+// PR121 CI job can be previewed; no private P2 images, logs, or other artifacts.
+const PINNED_GYM_QA_JOB=Object.freeze({
+  pipelineId:'e1bdd280-7359-47ed-8311-9347b6c42735',
+  jobId:'647927c4-0671-4442-8263-d67635ad1f24',jobNumber:318,
+});
+const GYM_QA_SCREENSHOTS=/^qa-intel\\/gym\\/historical-service\\/(?:source-evidence|source-review|source-holds)-(?:320|390|1280)\\.png$/;
+
 // Bar/POS screenshots use disposable CircleCI fixtures. Only the exact,
 // already-produced cashier and table-bill captures are readable; no JSON,
 // arbitrary Bar directory traversal, payment documents, or signed URLs.
@@ -436,7 +444,12 @@ export function validateCommand(command, keyId, now = Date.now()) {
         typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
         typeof command.artifactPath !== 'string' || command.artifactPath.length > 240 ||
         !(QA_IMAGE_PATHS[command.project].test(command.artifactPath) ||
-          (command.project === 'amaraii-os' && AMARAII_BAR_QA_SCREENSHOTS.test(command.artifactPath))) ||
+          (command.project === 'amaraii-os' && AMARAII_BAR_QA_SCREENSHOTS.test(command.artifactPath)) ||
+          (command.project === 'amaraii-os' &&
+           command.pipelineId === PINNED_GYM_QA_JOB.pipelineId &&
+           command.jobId === PINNED_GYM_QA_JOB.jobId &&
+           command.jobNumber === PINNED_GYM_QA_JOB.jobNumber &&
+           GYM_QA_SCREENSHOTS.test(command.artifactPath))) ||
         command.artifactPath.includes('..') ||
         command.branch !== undefined || command.mode !== undefined || command.commitSha !== undefined ||
         command.startNumber !== undefined) {
