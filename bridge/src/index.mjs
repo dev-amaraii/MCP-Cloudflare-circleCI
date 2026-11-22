@@ -205,6 +205,26 @@ function hasOnlyKeys(value, keys) {
 
 // Exact-job, allowlisted Bookings Vitest diagnosis for one disposable AmaraiiOS CI run.
 // Never return raw CircleCI output, environment values, command lines, or URLs.
+/** Exact CircleCI job 320 only: diagnostic classes/paths, never arbitrary output. */
+function summarizePr124Typecheck(raw){
+ const lines=String(raw).slice(-180000).replace(/\x1b\[[0-9;]*[A-Za-z]/g,"").split(/\r?\n/);
+ const errors=[],codes=[],kinds=[];
+ for(const row of lines){
+  const line=row.trim();
+  const ts=line.match(/(?:^|\s)(?:\.\.\/)*([a-z0-9_./-]+\.(?:tsx?|mts))\((\d{1,5}),(\d{1,4})\):\s*error\s*TS(\d{4})/i)||
+    line.match(/(?:^|\s)(?:\.\.\/)*([a-z0-9_./-]+\.(?:tsx?|mts)):(\d{1,5}):(\d{1,4}):\s*error\s*TS(\d{4})/i);
+  if(ts&&errors.length<22)errors.push({file:ts[1].slice(-110),line:Number(ts[2]),column:Number(ts[3]),code:'TS'+ts[4]});
+  for(const code of ['ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL','ERR_PNPM','ELIFECYCLE','ENOMEM','SIGKILL','SIGTERM','Cannot find module','Module not found','not found','No such file','Killed','heap out of memory','EACCES']){
+   if(line.includes(code)&&!codes.includes(code)&&codes.length<12)codes.push(code);
+  }
+  if(/(?:error TS\d{4}|error:|ERROR:|failed|exited with code)/i.test(line)){
+    const kind=line.match(/(?:^|\s)(?:@amaraii\/)?([a-z0-9_-]+):typecheck/i)?.[1];
+    if(kind&&!kinds.includes(kind)&&kinds.length<12)kinds.push(kind);
+  }
+ }
+ return {errors,codes,typecheckPackages:kinds,outputLengthClass:raw.length>50000?'over50k':'under50k',tailLength:lines.length};
+}
+
 export function summarizePr118WorkspaceVitest(raw) {
   const lines = String(raw).slice(-120000).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split(/\r?\n/);
   const titles=[], locations=[], categories=[], comparisons=[];
@@ -830,6 +850,10 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         const raw=full.slice(0,50000);
         // One pinned synthetic job only; all other projects/jobs retain their
         // existing diagnostic schema and cannot retrieve Vitest assertions.
+        const pinnedPr124=command.project==='amaraii-os' &&
+          command.pipelineId==='8e6bdb00-8cba-4fcb-88be-67937f3c9351' &&
+          command.jobId==='785ad4ae-0b7a-4810-b134-a350ef22a36c' &&
+          command.jobNumber===320 && failed.step.num===105;
         const pinnedPr118=command.project==='amaraii-os' &&
           command.pipelineId==='1ae4b8bb-100f-41aa-845c-9c5b7a128c0a' &&
           command.jobId==='9a3479e5-bead-4022-a454-fb5b9c638c76' &&
@@ -848,6 +872,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
             : [],
           outputAvailable:raw.length>0,
           ...(pinnedPr118?{pinnedVitest:summarizePr118WorkspaceVitest(full)}:{}),
+          ...(pinnedPr124?{pinnedTypecheck:summarizePr124Typecheck(full)}:{}),
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
     }
