@@ -35,14 +35,6 @@ const QA_IMAGE_PATHS = Object.freeze({
   churchpro: /^qa-intel\/churchpro\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+\.png$/,
 });
 
-// Only already-produced synthetic Gym source-review screenshots at the exact
-// PR121 CI job can be previewed; no private P2 images, logs, or other artifacts.
-const PINNED_GYM_QA_JOB=Object.freeze({
-  pipelineId:'e1bdd280-7359-47ed-8311-9347b6c42735',
-  jobId:'647927c4-0671-4442-8263-d67635ad1f24',jobNumber:318,
-});
-const GYM_QA_SCREENSHOTS=new RegExp("^qa-intel/gym/historical-service/(?:source-evidence|source-review|source-holds)-(?:320|390|1280)\\.png$");
-
 // Bar/POS screenshots use disposable CircleCI fixtures. Only the exact,
 // already-produced cashier and table-bill captures are readable; no JSON,
 // arbitrary Bar directory traversal, payment documents, or signed URLs.
@@ -214,6 +206,26 @@ function hasOnlyKeys(value, keys) {
 
 // Exact-job, allowlisted Bookings Vitest diagnosis for one disposable AmaraiiOS CI run.
 // Never return raw CircleCI output, environment values, command lines, or URLs.
+/** Exact CircleCI job 320 only: diagnostic classes/paths, never arbitrary output. */
+function summarizePr124Typecheck(raw){
+ const lines=String(raw).slice(-180000).replace(/\x1b\[[0-9;]*[A-Za-z]/g,"").split(/\r?\n/);
+ const errors=[],codes=[],kinds=[];
+ for(const row of lines){
+  const line=row.trim();
+  const ts=line.match(/(?:^|\s)(?:\.\.\/)*([a-z0-9_./-]+\.(?:tsx?|mts))\((\d{1,5}),(\d{1,4})\):\s*error\s*TS(\d{4})/i)||
+    line.match(/(?:^|\s)(?:\.\.\/)*([a-z0-9_./-]+\.(?:tsx?|mts)):(\d{1,5}):(\d{1,4}):\s*error\s*TS(\d{4})/i);
+  if(ts&&errors.length<22)errors.push({file:ts[1].slice(-110),line:Number(ts[2]),column:Number(ts[3]),code:'TS'+ts[4]});
+  for(const code of ['ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL','ERR_PNPM','ELIFECYCLE','ENOMEM','SIGKILL','SIGTERM','Cannot find module','Module not found','not found','No such file','Killed','heap out of memory','EACCES']){
+   if(line.includes(code)&&!codes.includes(code)&&codes.length<12)codes.push(code);
+  }
+  if(/(?:error TS\d{4}|error:|ERROR:|failed|exited with code)/i.test(line)){
+    const kind=line.match(/(?:^|\s)(?:@amaraii\/)?([a-z0-9_-]+):typecheck/i)?.[1];
+    if(kind&&!kinds.includes(kind)&&kinds.length<12)kinds.push(kind);
+  }
+ }
+ return {errors,codes,typecheckPackages:kinds,outputLengthClass:raw.length>50000?'over50k':'under50k',tailLength:lines.length};
+}
+
 export function summarizePr118WorkspaceVitest(raw) {
   const lines = String(raw).slice(-120000).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split(/\r?\n/);
   const titles=[], locations=[], categories=[], comparisons=[];
@@ -258,7 +270,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (!['circleci','semaphore','auto'].includes(provider)) throw new Error('CI provider not permitted');
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
-  // NEN-approved, exact-source, exact-job private ChurchPro QA evidence only.
+  // NEN-approved exact-source, exact-job private ChurchPro QA evidence only.
   if (command.project==='churchpro' && provider==='circleci' &&
       command.action==='churchpro_phase3_artifact') {
     if (command.pipelineId!==CHURCHPRO_PHASE3_PIN.workflowId ||
@@ -458,12 +470,7 @@ export function validateCommand(command, keyId, now = Date.now()) {
         typeof command.pipelineId !== 'string' || !UUID.test(command.pipelineId) ||
         typeof command.artifactPath !== 'string' || command.artifactPath.length > 240 ||
         !(QA_IMAGE_PATHS[command.project].test(command.artifactPath) ||
-          (command.project === 'amaraii-os' && AMARAII_BAR_QA_SCREENSHOTS.test(command.artifactPath)) ||
-          (command.project === 'amaraii-os' &&
-           command.pipelineId === PINNED_GYM_QA_JOB.pipelineId &&
-           command.jobId === PINNED_GYM_QA_JOB.jobId &&
-           command.jobNumber === PINNED_GYM_QA_JOB.jobNumber &&
-           GYM_QA_SCREENSHOTS.test(command.artifactPath))) ||
+          (command.project === 'amaraii-os' && AMARAII_BAR_QA_SCREENSHOTS.test(command.artifactPath))) ||
         command.artifactPath.includes('..') ||
         command.branch !== undefined || command.mode !== undefined || command.commitSha !== undefined ||
         command.startNumber !== undefined) {
@@ -865,6 +872,10 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         const raw=full.slice(0,50000);
         // One pinned synthetic job only; all other projects/jobs retain their
         // existing diagnostic schema and cannot retrieve Vitest assertions.
+        const pinnedPr124=command.project==='amaraii-os' &&
+          command.pipelineId==='8e6bdb00-8cba-4fcb-88be-67937f3c9351' &&
+          command.jobId==='785ad4ae-0b7a-4810-b134-a350ef22a36c' &&
+          command.jobNumber===320 && failed.step.num===105;
         const pinnedPr118=command.project==='amaraii-os' &&
           command.pipelineId==='1ae4b8bb-100f-41aa-845c-9c5b7a128c0a' &&
           command.jobId==='9a3479e5-bead-4022-a454-fb5b9c638c76' &&
@@ -883,6 +894,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
             : [],
           outputAvailable:raw.length>0,
           ...(pinnedPr118?{pinnedVitest:summarizePr118WorkspaceVitest(full)}:{}),
+          ...(pinnedPr124?{pinnedTypecheck:summarizePr124Typecheck(full)}:{}),
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
     }
