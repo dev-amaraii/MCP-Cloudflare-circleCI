@@ -11,7 +11,6 @@ import { readFile } from 'node:fs/promises';
 const liveV185 = Object.freeze({
   'amaraii-pr109-evidence.mjs': ['5854fc3c66c2ea55ab39ff087c1f66eb3f18c719cf67e9cee7768d808072dcc7', 11189],
   'circleci-nen-evidence.mjs': ['f7e3b0cea85a8a76547a5300fcc27500ae3cd2de5b162507094626e7d681edf4', 15081],
-  'index.mjs': ['0f18e2869795d5f286ddc91054ca6608c8647724522d02acb25f8ac2dfcef45f', 62453],
   'provider-routing.mjs': ['89d798f3e30359a51e77254f60895c778ef927e7ca66d7d69bfe4c72b6e51ef8', 1497],
   'semaphore-churchpro.mjs': ['1ce8c0927ce67ba7a3cd6ede09dae08f19733684e896099ed58bf44d60f517c8', 37267],
   'semaphore-nen.mjs': ['9510b775703487be16f57cd8078abd72ff791c4862050becfdb6d99b954ca1f8', 19997],
@@ -19,8 +18,8 @@ const liveV185 = Object.freeze({
   'semaphore.mjs': ['bc5fb8ae92cfbd964dead7139ddcbb40de927ac7b8db3604157fd6c74d9cd5de', 32442],
 });
 
-test('checked-in eight active bridge modules remain byte-identical to Cloudflare v185', async () => {
-  assert.equal(Object.keys(liveV185).length, 8);
+test('seven unchanged historical bridge modules retain their v185 verified source', async () => {
+  assert.equal(Object.keys(liveV185).length, 7);
   assert.ok(!Object.hasOwn(liveV185, 'circleci-nen.mjs'), 'the unused CircleCI trigger prototype must stay undeployed');
   for (const [filename, [digest, bytes]] of Object.entries(liveV185)) {
     const source = await readFile(new URL('../src/' + filename, import.meta.url));
@@ -28,4 +27,14 @@ test('checked-in eight active bridge modules remain byte-identical to Cloudflare
     assert.equal(source.byteLength, bytes, filename + ': live v185 byte length drift');
     assert.equal(actual, digest, filename + ': live v185 SHA-256 drift');
   }
+});
+
+test('updated bridge entrypoint preserves live Gym/Bookings code and exact Phase 3 read gate', async () => {
+  const source=await readFile(new URL('../src/index.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes('PINNED_GYM_QA_JOB'));
+  assert.ok(source.includes('summarizePr118WorkspaceVitest'));
+  assert.ok(source.includes("command.action==='churchpro_phase3_artifact'"));
+  assert.ok(source.includes('CHURCHPRO_PHASE3_PATHS.includes(command.artifactPath)'));
+  assert.ok(source.includes('readCircleCiChurchProPhase3(env,command,requestFn)'));
+  assert.ok(source.includes("fetch() {\n    return new Response('Not found'"));
 });
