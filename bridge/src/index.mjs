@@ -205,7 +205,47 @@ function hasOnlyKeys(value, keys) {
 
 // Exact-job, allowlisted Bookings Vitest diagnosis for one disposable AmaraiiOS CI run.
 // Never return raw CircleCI output, environment values, command lines, or URLs.
-export function summarizePr118WorkspaceVitest(raw) {
+export /**
+ * At most one user-authorized CI failure: private/synthetic browser suite,
+ * exact CircleCI pipeline, job and step below. Return only recognized test
+ * names, source-line numbers and error categories, never console text.
+ * This is not a generic output, URL, or CircleCI log proxy.
+ */
+function summarizePr121GymBrowserVitest(raw) {
+  const lines=String(raw).slice(-120000).replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').split(/\r?\n/);
+  const scenarios=[
+    'confirms a prepared reading without verifying payments or importing anything at',
+    'holds a reading rather than confirming without original evidence at',
+    'protects unsaved guided corrections before advanced evidence at',
+    'corrects source, matches shared identity and resumes with PT/payment holds at',
+  ];
+  const failedScenarios=[],sourceLines=[],errorKinds=[];
+  for (const original of lines) {
+    const line=original.trim();
+    if (/^FAIL\s+test\/gym-source-review\.browser\.spec\.ts\s*>/.test(line)) {
+      for (const scenario of scenarios) {
+        const width=line.match(/\b(320|390|1280)\b\s*$/)?.[1];
+        const label=scenario+' '+(width??'');
+        if (line.includes(scenario)&&width&&!failedScenarios.includes(label)&&failedScenarios.length<12)failedScenarios.push(label);
+      }
+    }
+    const loc=line.match(/\btest\/gym-source-review\.browser\.spec\.ts:(\d{1,4}):(\d{1,3})\b/);
+    if (loc && sourceLines.length<16 && !sourceLines.includes(loc[1]+':'+loc[2])) sourceLines.push(loc[1]+':'+loc[2]);
+    for(const category of ['AssertionError','TimeoutError','TypeError','ReferenceError','SyntaxError']) {
+      if(line.startsWith(category+':')&&!errorKinds.includes(category)&&errorKinds.length<6)errorKinds.push(category);
+    }
+  }
+  return {
+    failedScenarios,sourceLines,errorKinds,
+    testTimedOut:lines.some(l=>/Test timed out|TimeoutError|exceeded timeout/i.test(l)),
+    assertionFailed:lines.some(l=>/AssertionError|expect\(|Expected:|Received:/.test(l)),
+    browserExecutableMissing:lines.some(l=>/Executable doesn't exist|browserType\.launch/.test(l)),
+    moduleResolutionFailure:lines.some(l=>/Failed to resolve import|Cannot find module|ERR_MODULE_NOT_FOUND/.test(l)),
+    testFailuresDetected:lines.some(l=>/Test Files\s+1 failed|Tests\s+[0-9]+ failed/.test(l)),
+  };
+}
+
+function summarizePr118WorkspaceVitest(raw) {
   const lines = String(raw).slice(-120000).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split(/\r?\n/);
   const titles=[], locations=[], categories=[], comparisons=[];
   for (const original of lines) {
@@ -830,6 +870,10 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
         const raw=full.slice(0,50000);
         // One pinned synthetic job only; all other projects/jobs retain their
         // existing diagnostic schema and cannot retrieve Vitest assertions.
+        const pinnedPr121=command.project==='amaraii-os' &&
+          command.pipelineId==='150723ee-ec21-4493-b0c4-30d96d5aa50a' &&
+          command.jobId==='054d04d6-fabc-4a41-b011-4ba7dc4d4a07' &&
+          command.jobNumber===317 && failed.step.num===122;
         const pinnedPr118=command.project==='amaraii-os' &&
           command.pipelineId==='1ae4b8bb-100f-41aa-845c-9c5b7a128c0a' &&
           command.jobId==='9a3479e5-bead-4022-a454-fb5b9c638c76' &&
@@ -848,6 +892,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
             : [],
           outputAvailable:raw.length>0,
           ...(pinnedPr118?{pinnedVitest:summarizePr118WorkspaceVitest(full)}:{}),
+          ...(pinnedPr121?{pinnedGymBrowser:summarizePr121GymBrowserVitest(full)}:{}),
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
     }
