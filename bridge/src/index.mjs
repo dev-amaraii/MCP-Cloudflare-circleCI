@@ -13,7 +13,7 @@ import { executePr109Evidence } from './amaraii-pr109-evidence.mjs';
 import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-churchpro.mjs';
 import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_APPROVED_PREVIEWS, NEN_CMS_POLICY_44 } from './semaphore-nen.mjs';
 import {readCircleCiNenEvidence,probeCircleCiNenProject} from './circleci-nen-evidence.mjs';
-import {readCircleCiChurchProPhase3,CHURCHPRO_PHASE3_PIN,CHURCHPRO_PHASE3_PATHS} from './circleci-churchpro-phase3.mjs';
+import {readCircleCiChurchProPhase3,checkedPhase3Artifact} from './circleci-churchpro-phase3.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -272,15 +272,17 @@ export function validateCommand(command, keyId, now = Date.now()) {
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
   // NEN-approved exact-source, exact-job private ChurchPro QA evidence only.
   if (command.project==='churchpro' && provider==='circleci' &&
-      command.action==='churchpro_phase3_artifact') {
-    if (command.pipelineId!==CHURCHPRO_PHASE3_PIN.workflowId ||
-        command.jobId!==CHURCHPRO_PHASE3_PIN.jobId ||
-        !CHURCHPRO_PHASE3_PATHS.includes(command.artifactPath) ||
-        command.branch!==undefined || command.mode!==undefined ||
+      ['churchpro_phase3_artifact','churchpro_phase3_latest_artifact'].includes(command.action)) {
+    if (command.branch!==undefined || command.mode!==undefined ||
         command.commitSha!==undefined || command.startNumber!==undefined ||
         command.jobNumber!==undefined) {
       throw new Error('ChurchPro Phase3 artifact action denied');
     }
+    checkedPhase3Artifact({
+      project:command.project,provider:command.provider,action:command.action,
+      pipelineId:command.pipelineId,jobId:command.jobId,
+      artifactPath:command.artifactPath,
+    });
     return {command,project};
   }
   // CircleCI access for NEN is strictly READ-ONLY and scoped to reviewed
@@ -645,7 +647,7 @@ async function resolveDefinitionId(env, project, requestFn) {
 
 export async function executeCommand(env, command, project, requestFn = fetch) {
   if (command.project==='churchpro' && command.provider==='circleci' &&
-      command.action==='churchpro_phase3_artifact') {
+      ['churchpro_phase3_artifact','churchpro_phase3_latest_artifact'].includes(command.action)) {
     return readCircleCiChurchProPhase3(env, {
       project:command.project,provider:command.provider,action:command.action,
       pipelineId:command.pipelineId,jobId:command.jobId,
