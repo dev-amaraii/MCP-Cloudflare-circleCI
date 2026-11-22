@@ -125,7 +125,12 @@ function validProof(proof){
 function validReport(path,value,pin){
   check(isObject(value)&&value.schemaVersion===1,'ChurchPro Phase3 invalid case schema');
   if(path===CHURCHPRO_PHASE3_LATEST.faultArtifact){
-    check(value.sourceRevision===pin.sourceRevision&&
+    check(Object.keys(value).length===14&&
+      ['schemaVersion','project','sourceRevision','evidenceKind','database',
+       'originalTestSource','jestReportSha256','faultCases','machineFaultParts',
+       'passedTests','independentSupervisorVerified','independentReviewerVerified',
+       'independentApiAcceptance','releaseAuthorized'].every(k=>Object.hasOwn(value,k))&&
+      value.sourceRevision===pin.sourceRevision&&
       value.project==='ChurchPro'&&
       value.evidenceKind==='isolated_disposable_fault_machine_observation_not_a_reviewer_verdict'&&
       value.database==='fresh_testcontainers_postgresql'&&
@@ -138,10 +143,18 @@ function validReport(path,value,pin){
       Array.isArray(value.faultCases)&&value.faultCases.length===2&&
       value.faultCases[0].id==='UAT-12'&&value.faultCases[1].id==='A12'&&
       value.faultCases.every(x=>x.status==='DISPOSABLE_MACHINE_EVIDENCE_AVAILABLE_SUPERVISION_PENDING')&&
+      value.originalTestSource==='apps/api/test/attendance-api.e2e-spec.ts'&&
       value.faultCases[0].parts?.length===2&&value.faultCases[1].parts?.length===1&&
+      value.faultCases[0].parts[0].part==='service'&&
+      value.faultCases[0].parts[1].part==='session'&&
+      value.faultCases[1].parts[0].part==='attendance'&&
       JSON.stringify(value.faultCases.map(x=>x.parts.map(p=>p.observedHttp)))===
         JSON.stringify([[[500,201],[500,201,200]],[[500,500,201,200]]])&&
-      value.faultCases.every(x=>x.parts.every(p=>p.result==='machine_assertions_passed'&&
+      value.faultCases.every(x=>Object.keys(x).length===3&&
+        ['id','status','parts'].every(k=>Object.hasOwn(x,k))&&
+        x.parts.every(p=>Object.keys(p).length===4&&
+        ['part','observedHttp','assertedChecks','result'].every(k=>Object.hasOwn(p,k))&&
+        p.result==='machine_assertions_passed'&&
         Array.isArray(p.assertedChecks)&&p.assertedChecks.length>=4&&
         p.assertedChecks.every(k=>typeof k==='string'&&/^[A-Za-z]{4,40}$/.test(k)))),
       'ChurchPro Phase3 controlled fault report invalid');
