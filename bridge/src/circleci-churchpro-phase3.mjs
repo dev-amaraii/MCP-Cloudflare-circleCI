@@ -214,7 +214,7 @@ export async function readCircleCiChurchProPhase3(env,command,requestFn=fetch){
   const bytes=await artifactBytes(env,matches[0].attributes.url,requestFn);
   let data;try{data=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
   catch{throw Error('ChurchPro Phase3 JSON invalid');}
-  validReport(command.artifactPath,data);
+  validReport(command.artifactPath,data,pin);
   const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)))
     .map(x=>x.toString(16).padStart(2,'0')).join('');
   return {project:'churchpro',provider:'circleci',sourceRevision:pin.sourceRevision,
