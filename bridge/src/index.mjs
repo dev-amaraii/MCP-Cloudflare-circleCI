@@ -232,11 +232,11 @@ function summarizePr124UnitFailures(raw){
  const failedFiles=[],failedTests=[],locations=[],kinds=[],packages=[];
  for(const line0 of lines){
   const line=line0.trim();
-  const file=line.match(/(?:^|\s)(?:FAIL|❯)\s+((?:packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?)/);
-  if(file&&failedFiles.length<12&&!failedFiles.includes(file[1]))failedFiles.push(file[1].slice(0,140));
+  const file=line.match(/\b((?:src|packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?)/);
+  if(file&&(/\bfail(?:ed)?\b|[×❯]|\bFAIL\b/i.test(line))&&failedFiles.length<12&&!failedFiles.includes(file[1]))failedFiles.push(file[1].slice(0,140));
   const test=line.match(/\b(?:FAIL|×|❯)\s+([\w -]{2,85})\s*>\s*([\w /()'.,:-]{2,120})/);
   if(test&&failedTests.length<12)failedTests.push((test[1]+' > '+test[2]).slice(0,160));
-  const loc=line.match(/\b((?:packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?):(\d{1,5}):(\d{1,4})/);
+  const loc=line.match(/\b((?:src|packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?):(\d{1,5}):(\d{1,4})/);
   if(loc&&locations.length<16)locations.push({file:loc[1].slice(0,130),line:Number(loc[2]),column:Number(loc[3])});
   for(const kind of ['AssertionError','TypeError','ReferenceError','ZodError','DatabaseError','TimeoutError','SyntaxError','AggregateError']){
     if(line.includes(kind)&&!kinds.includes(kind))kinds.push(kind);
