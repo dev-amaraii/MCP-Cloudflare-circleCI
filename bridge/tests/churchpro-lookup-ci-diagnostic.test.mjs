@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { summarizePinnedChurchProLookupFailure } from '../src/churchpro-lookup-ci-diagnostic.mjs';
@@ -54,4 +55,19 @@ test('scope cannot be widened to unrelated pipelines, arbitrary CircleCI jobs or
     [{...db,provider:'semaphore'},107],
     [{...db,project:'amaraii-os'},107],
   ])assert.equal(summarizePinnedChurchProLookupFailure('test',args,step),null);
+});
+
+test('stderr read is statically pinned to one source/job/step, never generic',()=>{
+  const source=readFileSync(new URL('../src/index.mjs',import.meta.url),'utf8');
+  const start=source.indexOf('const pinnedChurchProLookupStderr =');
+  const end=source.indexOf('failedStepDiagnostic={',start);
+  assert.ok(start>0&&end>start);
+  const proof=source.slice(start,end);
+  assert.match(proof,/90b99a1f-1f3e-48c7-94f4-ca8adba8043c/);
+  assert.match(proof,/e85b9940-36d2-45cb-84ee-92bec7e3ec4e/);
+  assert.match(proof,/jobNumber===1241/);
+  assert.match(proof,/failed\.step\.num===111/);
+  assert.match(proof,/stderr\?filter/);
+  assert.match(proof,/summarizePinnedChurchProLookupFailure\(errSource/);
+  assert.doesNotMatch(proof,/return\s+errSource|return\s+errResponse\.text/);
 });
