@@ -910,6 +910,30 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           command.pipelineId==='1ae4b8bb-100f-41aa-845c-9c5b7a128c0a' &&
           command.jobId==='9a3479e5-bead-4022-a454-fb5b9c638c76' &&
           command.jobNumber===313 && failed.step.num===145;
+        // Read *only* one exact failed ChurchPro synthetic API step's stderr;
+        // classify in-worker and return fixed labels, never raw output.
+        const pinnedChurchProLookupStderr =
+          command.project==='churchpro' &&
+          command.pipelineId==='90b99a1f-1f3e-48c7-94f4-ca8adba8043c' &&
+          command.jobId==='e85b9940-36d2-45cb-84ee-92bec7e3ec4e' &&
+          command.jobNumber===1241 && failed.step.num===111;
+        let safeChurchProStderr=null;
+        if(pinnedChurchProLookupStderr){
+          try{
+            const errUrl='https://circleci.com/api/v3/jobs/' + command.jobId +
+              '/stderr?filter%5Bexecution%5D=' + failed.index +
+              '&filter%5Bstep_num%5D=' + failed.step.num;
+            const errResponse=await requestFn(errUrl,{
+              method:'GET',redirect:'manual',
+              headers:{Authorization:'Bearer ' + env.CIRCLE_TOKEN,Accept:'text/plain'},
+            });
+            const errSource=errResponse.ok?(await errResponse.text()):'';
+            safeChurchProStderr={
+              httpStatus:errResponse.status,
+              classified:summarizePinnedChurchProLookupFailure(errSource,command,failed.step.num),
+            };
+          }catch{safeChurchProStderr={available:false};}
+        }
         failedStepDiagnostic={
           stepNumber:failed.step.num,
           httpStatus:out.status,
@@ -927,6 +951,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           ...(pinnedPr124?{pinnedTypecheck:summarizePr124Typecheck(full)}:{}),
           ...(pinnedPr124Unit?{pinnedUnits:summarizePr124UnitFailures(full)}:{}),
           ...(command.project==='churchpro'?{pinnedChurchProLookupTests:summarizePinnedChurchProLookupFailure(full,command,failed.step.num)}:{}),
+          ...(pinnedChurchProLookupStderr?{pinnedChurchProStderr:safeChurchProStderr}:{}),
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
     }
