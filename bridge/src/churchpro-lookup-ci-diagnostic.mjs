@@ -5,18 +5,19 @@
  * lookup is independently verified by the existing job_steps handler.
  */
 const PIN = Object.freeze({
-  pipelineId: '0a9f358e-5947-4737-99ca-50cebc4a99fa',
   jobs: Object.freeze({
-    'c2119a08-51c7-4c1f-9344-3c79408fdfa6': Object.freeze({ number: 1224, step: 107, label: 'database' }),
-    '5409d92d-ead1-424a-b3a2-6c09a9cfb477': Object.freeze({ number: 1231, step: 111, label: 'api' }),
+    'c2119a08-51c7-4c1f-9344-3c79408fdfa6': Object.freeze({ pipelineId: '0a9f358e-5947-4737-99ca-50cebc4a99fa', number: 1224, step: 107, label: 'database' }),
+    '5409d92d-ead1-424a-b3a2-6c09a9cfb477': Object.freeze({ pipelineId: '0a9f358e-5947-4737-99ca-50cebc4a99fa', number: 1231, step: 111, label: 'api' }),
+    'e85b9940-36d2-45cb-84ee-92bec7e3ec4e': Object.freeze({ pipelineId: '90b99a1f-1f3e-48c7-94f4-ca8adba8043c', number: 1241, step: 111, label: 'api' }),
   }),
 });
 
 export function summarizePinnedChurchProLookupFailure(raw, command, failedStep) {
   if (!command || command.project !== 'churchpro' ||
-      command.provider !== 'circleci' || command.pipelineId !== PIN.pipelineId) return null;
+      command.provider !== 'circleci') return null;
   const job = PIN.jobs[command.jobId];
-  if (!job || command.jobNumber !== job.number || failedStep !== job.step) return null;
+  if (!job || command.pipelineId !== job.pipelineId ||
+      command.jobNumber !== job.number || failedStep !== job.step) return null;
 
   const text = String(raw || '').slice(-180000).replace(/\x1b\[[0-9;]*[A-Za-z]/gu, '');
   const kinds = [];
