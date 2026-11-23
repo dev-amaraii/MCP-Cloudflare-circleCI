@@ -8,6 +8,9 @@ const db={project:'churchpro',provider:'circleci',pipelineId,
   jobId:'c2119a08-51c7-4c1f-9344-3c79408fdfa6',jobNumber:1224};
 const api={project:'churchpro',provider:'circleci',pipelineId,
   jobId:'5409d92d-ead1-424a-b3a2-6c09a9cfb477',jobNumber:1231};
+const apiSecond={project:'churchpro',provider:'circleci',
+  pipelineId:'90b99a1f-1f3e-48c7-94f4-ca8adba8043c',
+  jobId:'e85b9940-36d2-45cb-84ee-92bec7e3ec4e',jobNumber:1241};
 
 test('exact database test job reports only allowlisted classifications, not raw private text',()=>{
   const raw='FAIL src/internal/attendance-capture-store.test.ts > escapes wildcard and escape metacharacters\n' +
@@ -30,6 +33,18 @@ test('API test identifiers are fixed source labels, no search payload or stdout 
   assert.deepEqual(result?.sqlStateOrTsCodes,['42601']);
   assert.doesNotMatch(JSON.stringify(result),/visitor contact|invalid SQL value/iu);
 });
+test('second API pipeline pin is distinct, but returns the same private-safe diagnosis shape',()=>{
+  const raw='FAIL apps/api/test/attendance-api.e2e-spec.ts\n' +
+    '● P3.2b literal candidate query escapes LIKE metacharacters\n' +
+    'AssertionError: expected Person Secret to equal Another Secret\n';
+  const result=summarizePinnedChurchProLookupFailure(raw,apiSecond,111);
+  assert.equal(result?.job,'api');
+  assert.deepEqual(result?.failedTestIds,['literal_index_api']);
+  assert.equal(result?.sourcePin,'churchpro-p32b-lookup-00f545e4');
+  assert.doesNotMatch(JSON.stringify(result),/Secret/);
+  assert.equal(summarizePinnedChurchProLookupFailure(raw,{...apiSecond,pipelineId},111),null);
+});
+
 
 test('scope cannot be widened to unrelated pipelines, arbitrary CircleCI jobs or steps',()=>{
   for(const [args,step] of [
