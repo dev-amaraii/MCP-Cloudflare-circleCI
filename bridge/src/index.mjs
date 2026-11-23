@@ -14,6 +14,7 @@ import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-chur
 import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_APPROVED_PREVIEWS, NEN_CMS_POLICY_44 } from './semaphore-nen.mjs';
 import {readCircleCiNenEvidence,probeCircleCiNenProject} from './circleci-nen-evidence.mjs';
 import {readCircleCiChurchProPhase3,checkedPhase3Artifact} from './circleci-churchpro-phase3.mjs';
+import { summarizePinnedChurchProLookupFailure } from './churchpro-lookup-ci-diagnostic.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -925,6 +926,7 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           ...(pinnedPr118?{pinnedVitest:summarizePr118WorkspaceVitest(full)}:{}),
           ...(pinnedPr124?{pinnedTypecheck:summarizePr124Typecheck(full)}:{}),
           ...(pinnedPr124Unit?{pinnedUnits:summarizePr124UnitFailures(full)}:{}),
+          ...(command.project==='churchpro'?{pinnedChurchProLookupTests:summarizePinnedChurchProLookupFailure(full,command,failed.step.num)}:{}),
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
     }
