@@ -13,6 +13,8 @@ import { executePr109Evidence } from './amaraii-pr109-evidence.mjs';
 import { executeSemaphoreChurchPro, CHURCHPRO_SEMAPHORE } from './semaphore-churchpro.mjs';
 import { executeSemaphoreNen, NEN_SCREENSHOT, NEN_APPROVED_PREVIEWS, NEN_CMS_POLICY_44 } from './semaphore-nen.mjs';
 import {readCircleCiNenEvidence,probeCircleCiNenProject} from './circleci-nen-evidence.mjs';
+import {readCircleCiChurchProPhase3,checkedPhase3Artifact} from './circleci-churchpro-phase3.mjs';
+import { summarizePinnedChurchProLookupFailure } from './churchpro-lookup-ci-diagnostic.mjs';
 import { selectProvider } from './provider-routing.mjs';
 
 const API = 'https://circleci.com/api/v2';
@@ -203,6 +205,76 @@ function hasOnlyKeys(value, keys) {
   return Object.keys(value).every(key => keys.includes(key));
 }
 
+// Exact-job, allowlisted Bookings Vitest diagnosis for one disposable AmaraiiOS CI run.
+// Never return raw CircleCI output, environment values, command lines, or URLs.
+/** Exact CircleCI job 320 only: diagnostic classes/paths, never arbitrary output. */
+function summarizePr124Typecheck(raw){
+ const lines=String(raw).slice(-180000).replace(/\x1b\[[0-9;]*[A-Za-z]/g,"").split(/\r?\n/);
+ const errors=[],codes=[],kinds=[];
+ for(const row of lines){
+  const line=row.trim();
+  const ts=line.match(/(?:^|\s)(?:\.\.\/)*([a-z0-9_./-]+\.(?:tsx?|mts))\((\d{1,5}),(\d{1,4})\):\s*error\s*TS(\d{4})/i)||
+    line.match(/(?:^|\s)(?:\.\.\/)*([a-z0-9_./-]+\.(?:tsx?|mts)):(\d{1,5}):(\d{1,4}):\s*error\s*TS(\d{4})/i);
+  if(ts&&errors.length<22)errors.push({file:ts[1].slice(-110),line:Number(ts[2]),column:Number(ts[3]),code:'TS'+ts[4]});
+  for(const code of ['ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL','ERR_PNPM','ELIFECYCLE','ENOMEM','SIGKILL','SIGTERM','Cannot find module','Module not found','not found','No such file','Killed','heap out of memory','EACCES']){
+   if(line.includes(code)&&!codes.includes(code)&&codes.length<12)codes.push(code);
+  }
+  if(/(?:error TS\d{4}|error:|ERROR:|failed|exited with code)/i.test(line)){
+    const kind=line.match(/(?:^|\s)(?:@amaraii\/)?([a-z0-9_-]+):typecheck/i)?.[1];
+    if(kind&&!kinds.includes(kind)&&kinds.length<12)kinds.push(kind);
+  }
+ }
+ return {errors,codes,typecheckPackages:kinds,outputLengthClass:raw.length>50000?'over50k':'under50k',tailLength:lines.length};
+}
+
+/** Exact synthetic job321 step106, bounded unit failure metadata only. */
+function summarizePr124UnitFailures(raw){
+ const lines=String(raw).slice(-180000).replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').split(/\r?\n/);
+ const failedFiles=[],failedTests=[],locations=[],kinds=[],packages=[];
+ for(const line0 of lines){
+  const line=line0.trim();
+  const file=line.match(/\b((?:src|packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?)/);
+  if(file&&(/\bfail(?:ed)?\b|[×❯]|\bFAIL\b/i.test(line))&&failedFiles.length<12&&!failedFiles.includes(file[1]))failedFiles.push(file[1].slice(0,140));
+  const test=line.match(/\b(?:FAIL|×|❯)\s+([\w -]{2,85})\s*>\s*([\w /()'.,:-]{2,120})/);
+  if(test&&failedTests.length<12)failedTests.push((test[1]+' > '+test[2]).slice(0,160));
+  const loc=line.match(/\b((?:src|packages|apps|test)\/[a-zA-Z0-9_./-]+\.spec\.[tj]sx?):(\d{1,5}):(\d{1,4})/);
+  if(loc&&locations.length<16)locations.push({file:loc[1].slice(0,130),line:Number(loc[2]),column:Number(loc[3])});
+  for(const kind of ['AssertionError','TypeError','ReferenceError','ZodError','DatabaseError','TimeoutError','SyntaxError','AggregateError']){
+    if(line.includes(kind)&&!kinds.includes(kind))kinds.push(kind);
+  }
+  const pkg=line.match(/(?:^|\s)@amaraii\/([\w-]+):test:/);
+  if(pkg&&!packages.includes(pkg[1]))packages.push(pkg[1]);
+ }
+ return {failedFiles,failedTests,locations,kinds,packages:packages.slice(0,15),
+   testsFailed:lines.some(l=>/Test Files\s+\d+ failed|Tests\s+\d+ failed/.test(l)),
+   timeout:lines.some(l=>/Test timed out|TimeoutError/.test(l))};
+}
+
+export function summarizePr118WorkspaceVitest(raw) {
+  const lines = String(raw).slice(-120000).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split(/\r?\n/);
+  const titles=[], locations=[], categories=[], comparisons=[];
+  for (const original of lines) {
+    const line=original.trim();
+    const named=line.match(/^FAIL\s+(?:test\/bookings-pitches\.integration\.spec\.ts|packages\/bookings-core\/src\/calendar\.spec\.ts)\s*>\s*(.{1,220})$/);
+    if (named && titles.length < 8) {
+      const title=named[1].replace(/[^a-zA-Z0-9 _.,:'()\/-]/g,'').slice(0,180).trim();
+      if (title && !titles.includes(title)) titles.push(title);
+    }
+    const loc=line.match(/(?:^|\s|\()(?:test\/bookings-pitches\.integration\.spec\.ts|packages\/bookings-core\/src\/calendar\.spec\.ts):(\d{1,5}):(\d{1,3})(?:\b|\))/);
+    if(loc && locations.length < 8) {
+      const key=loc[1]+':'+loc[2];
+      if (!locations.includes(key)) locations.push(key);
+    }
+    if (/^(?:AssertionError|TypeError|ReferenceError|DatabaseError|Error):/.test(line)) {
+      const category=line.split(':',1)[0];
+      if(categories.length<6 && !categories.includes(category))categories.push(category);
+    }
+    const comparison=line.match(/\bexpected\s+(\d{1,3})\s+to\s+(?:be|equal)\s+(\d{1,3})\b/i);
+    if(comparison && comparisons.length<5) comparisons.push({actual:Number(comparison[1]),expected:Number(comparison[2])});
+  }
+  return {failedTests:titles,sourceLocations:locations,errorKinds:categories,numericComparisons:comparisons,timeoutDetected:lines.some(x=>/Test timed out|TimeoutError|exceeded timeout/i.test(x))};
+}
+
 export function validateCommand(command, keyId, now = Date.now()) {
   if (!isPlainObject(command) ||
       !hasOnlyKeys(command, ['v','id','action','project','provider','branch','mode','commitSha','pipelineId','startNumber','jobNumber','jobId','artifactPath','requestedAt','approved'])) {
@@ -222,6 +294,21 @@ export function validateCommand(command, keyId, now = Date.now()) {
   if (!['circleci','semaphore','auto'].includes(provider)) throw new Error('CI provider not permitted');
   if (provider === 'auto' && (command.project !== 'amaraii-os' ||
       !['route','trigger'].includes(command.action))) throw new Error('Automatic CI route not permitted');
+  // NEN-approved exact-source, exact-job private ChurchPro QA evidence only.
+  if (command.project==='churchpro' && provider==='circleci' &&
+      ['churchpro_phase3_artifact','churchpro_phase3_latest_artifact'].includes(command.action)) {
+    if (command.branch!==undefined || command.mode!==undefined ||
+        command.commitSha!==undefined || command.startNumber!==undefined ||
+        command.jobNumber!==undefined) {
+      throw new Error('ChurchPro Phase3 artifact action denied');
+    }
+    checkedPhase3Artifact({
+      project:command.project,provider:command.provider,action:command.action,
+      pipelineId:command.pipelineId,jobId:command.jobId,
+      artifactPath:command.artifactPath,
+    });
+    return {command,project};
+  }
   // CircleCI access for NEN is strictly READ-ONLY and scoped to reviewed
   // Security QA jobs. Existing NEN Semaphore approvals are unaffected.
   if (command.project === 'nen-website-cms' && provider === 'circleci') {
@@ -583,6 +670,14 @@ async function resolveDefinitionId(env, project, requestFn) {
 }
 
 export async function executeCommand(env, command, project, requestFn = fetch) {
+  if (command.project==='churchpro' && command.provider==='circleci' &&
+      ['churchpro_phase3_artifact','churchpro_phase3_latest_artifact'].includes(command.action)) {
+    return readCircleCiChurchProPhase3(env, {
+      project:command.project,provider:command.provider,action:command.action,
+      pipelineId:command.pipelineId,jobId:command.jobId,
+      artifactPath:command.artifactPath,
+    },requestFn);
+  }
   if (command.project === 'nen-website-cms' && command.provider === 'circleci') {
     const actions = {
       nen_ci_job_diagnostics: 'job_diagnostics',
@@ -799,7 +894,46 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
           method:'GET',redirect:'manual',
           headers:{Authorization:'Bearer ' + env.CIRCLE_TOKEN,Accept:'text/plain'},
         });
-        const raw=out.ok?(await out.text()).slice(0,50000):'';
+        const full=out.ok?(await out.text()):'';
+        const raw=full.slice(0,50000);
+        // One pinned synthetic job only; all other projects/jobs retain their
+        // existing diagnostic schema and cannot retrieve Vitest assertions.
+        const pinnedPr124=command.project==='amaraii-os' &&
+          command.pipelineId==='8e6bdb00-8cba-4fcb-88be-67937f3c9351' &&
+          command.jobId==='785ad4ae-0b7a-4810-b134-a350ef22a36c' &&
+          command.jobNumber===320 && failed.step.num===105;
+        const pinnedPr124Unit=command.project==='amaraii-os' &&
+          command.pipelineId==='b6643e65-ca11-42de-bc41-fcbd1a12238c' &&
+          command.jobId==='e107e64b-2f26-4f0f-8f51-38237f846dfb' &&
+          command.jobNumber===321 && failed.step.num===106;
+        const pinnedPr118=command.project==='amaraii-os' &&
+          command.pipelineId==='1ae4b8bb-100f-41aa-845c-9c5b7a128c0a' &&
+          command.jobId==='9a3479e5-bead-4022-a454-fb5b9c638c76' &&
+          command.jobNumber===313 && failed.step.num===145;
+        // Read *only* one exact failed ChurchPro synthetic API step's stderr;
+        // classify in-worker and return fixed labels, never raw output.
+        const pinnedChurchProLookupStderr =
+          command.project==='churchpro' &&
+          command.pipelineId==='90b99a1f-1f3e-48c7-94f4-ca8adba8043c' &&
+          command.jobId==='e85b9940-36d2-45cb-84ee-92bec7e3ec4e' &&
+          command.jobNumber===1241 && failed.step.num===111;
+        let safeChurchProStderr=null;
+        if(pinnedChurchProLookupStderr){
+          try{
+            const errUrl='https://circleci.com/api/v3/jobs/' + command.jobId +
+              '/stderr?filter%5Bexecution%5D=' + failed.index +
+              '&filter%5Bstep_num%5D=' + failed.step.num;
+            const errResponse=await requestFn(errUrl,{
+              method:'GET',redirect:'manual',
+              headers:{Authorization:'Bearer ' + env.CIRCLE_TOKEN,Accept:'text/plain'},
+            });
+            const errSource=errResponse.ok?(await errResponse.text()):'';
+            safeChurchProStderr={
+              httpStatus:errResponse.status,
+              classified:summarizePinnedChurchProLookupFailure(errSource,command,failed.step.num),
+            };
+          }catch{safeChurchProStderr={available:false};}
+        }
         failedStepDiagnostic={
           stepNumber:failed.step.num,
           httpStatus:out.status,
@@ -813,6 +947,11 @@ export async function executeCommand(env, command, project, requestFn = fetch) {
                   .replace(/sk_(?:live|test)_[A-Za-z0-9]+/g,'[REDACTED]').slice(0,240))
             : [],
           outputAvailable:raw.length>0,
+          ...(pinnedPr118?{pinnedVitest:summarizePr118WorkspaceVitest(full)}:{}),
+          ...(pinnedPr124?{pinnedTypecheck:summarizePr124Typecheck(full)}:{}),
+          ...(pinnedPr124Unit?{pinnedUnits:summarizePr124UnitFailures(full)}:{}),
+          ...(command.project==='churchpro'?{pinnedChurchProLookupTests:summarizePinnedChurchProLookupFailure(full,command,failed.step.num)}:{}),
+          ...(pinnedChurchProLookupStderr?{pinnedChurchProStderr:safeChurchProStderr}:{}),
         };
       } catch { failedStepDiagnostic={stepNumber:failed.step.num,available:false}; }
     }
@@ -995,6 +1134,17 @@ export async function processRequest(env, id, raw, now = Date.now(), requestFn =
       'Invalid release revision', 'Release command has unexpected fields', 'Invalid job number', 'Job inspection has unexpected fields', 'Job project mismatch',
       'Invalid job identity', 'Job steps have unexpected fields', 'Job does not belong to approved pipeline', 'Job identity mismatch',
       'Semaphore artifact listing not permitted', 'Semaphore artifact preview not permitted', 'Semaphore QA artifact access not permitted', 'Artifact preview not permitted', 'Artifact not found', 'Artifact too large', 'Artifact format not supported', 'Artifact download failed', 'Unsafe artifact URL',
+      'ChurchPro Phase3 artifact action denied', 'ChurchPro Phase3 API origin denied',
+      'ChurchPro Phase3 upstream unavailable', 'ChurchPro Phase3 invalid provider JSON',
+      'ChurchPro Phase3 artifact URL denied', 'ChurchPro Phase3 artifact download denied',
+      'ChurchPro Phase3 artifact too large', 'ChurchPro Phase3 artifact redirect limit',
+      'ChurchPro Phase3 invalid case schema', 'ChurchPro Phase3 revision mismatch',
+      'ChurchPro Phase3 synthetic source invalid', 'ChurchPro Phase3 unsafe case field',
+      'ChurchPro Phase3 unexpected case evidence', 'ChurchPro Phase3 review intake invalid',
+      'ChurchPro Phase3 review handoff invalid', 'ChurchPro Phase3 workflow identity mismatch',
+      'ChurchPro Phase3 project or source mismatch', 'ChurchPro Phase3 job ownership mismatch',
+      'ChurchPro Phase3 artifact listing invalid', 'ChurchPro Phase3 artifact not found',
+      'ChurchPro Phase3 JSON invalid',
       'ChurchPro report access not permitted', 'ChurchPro pipeline identity mismatch',
       'ChurchPro source identity missing', 'ChurchPro workflow identity mismatch',
       'ChurchPro QA job ownership mismatch', 'QA artifact unavailable',
